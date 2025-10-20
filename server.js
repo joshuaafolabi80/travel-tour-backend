@@ -14,8 +14,8 @@ app.use(cors({
   origin: [
     "http://localhost:5173", 
     "http://localhost:5174",
-    "https://travel-tour-app-seven.vercel.app", // Your ACTUAL frontend URL
-    "https://travel-tour-backend-8erv.onrender.com" // Your backend URL
+    "https://the-conclave-academy.netlify.app", // Your Netlify frontend URL
+    "https://travel-tour-academy-backend.onrender.com" // Your backend URL
   ],
   credentials: true
 }));
@@ -2008,8 +2008,8 @@ const initializeSocket = (server) => {
       origin: [
         "http://localhost:5173", 
         "http://localhost:5174",
-        "https://travel-tour-app-seven.vercel.app", // Your ACTUAL frontend URL
-        "https://travel-tour-backend-8erv.onrender.com" // Your backend URL
+        "https://the-conclave-academy.netlify.app", // Your Netlify frontend URL
+        "https://travel-tour-academy-backend.onrender.com" // Your backend URL
       ],
       methods: ["GET", "POST"],
       credentials: true
@@ -2337,7 +2337,7 @@ const startServer = async () => {
       console.log('👤 User data: Fetches from users collection for enhanced certificates');
       console.log('📝 Course descriptions: Fetched from general_course_questions collection');
       console.log('👥 Community features: Real-time messaging and voice calls enabled');
-      console.log('🌐 CORS configured for production: travel-tour-app-seven.vercel.app and travel-tour-backend-8erv.onrender.com');
+      console.log('🌐 CORS configured for production: the-conclave-academy.netlify.app and travel-tour-academy-backend.onrender.com');
       console.log('📦 Frontend static files served from: ../dist directory');
     });
 

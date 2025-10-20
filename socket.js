@@ -8,7 +8,12 @@ const userSockets = new Map();
 const initializeSocket = (server) => {
   io = socketIo(server, {
     cors: {
-      origin: ["http://localhost:5173", "http://localhost:5174"],
+      origin: [
+        "http://localhost:5173", 
+        "http://localhost:5174",
+        "https://the-conclave-academy.netlify.app", // Your Netlify frontend URL
+        "https://travel-tour-academy-backend.onrender.com" // Your backend URL
+      ],
       methods: ["GET", "POST"]
     }
   });
