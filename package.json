@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "cloudinary": "^1.41.3",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
@@ -18,9 +19,9 @@
     "mongodb": "^6.20.0",
     "mongoose": "^7.8.7",
     "multer": "^2.0.2",
+    "nodemailer": "^7.0.9",
     "socket.io": "^4.8.1",
-    "uuid": "^13.0.0",
-    "cloudinary": "^1.41.0"
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
