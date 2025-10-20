@@ -2297,7 +2297,7 @@ const startServer = async () => {
       console.log(`\n📚 Course routes:`);
       console.log(`📍   Notification counts: http://localhost:${PORT}/api/courses/notification-counts`);
       console.log(`📍   Admin messages: http://localhost:${PORT}/api/notifications/admin-messages/:userId`);
-      console.log(`📍   Get courses: http://localhost:${Port}/api/courses`);
+      console.log(`📍   Get courses: http://localhost:${PORT}/api/courses`);
       console.log(`📍   Get course by ID: http://localhost:${PORT}/api/courses/:id`);
       console.log(`📍   Validate masterclass: http://localhost:${PORT}/api/courses/validate-masterclass-access`);
       console.log(`📍   Direct course view: http://localhost:${PORT}/api/direct-courses/:id/view`);
