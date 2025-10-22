@@ -219,7 +219,7 @@ router.get('/courses/debug/morocco', authMiddleware, async (req, res) => {
 
 // 🚨 PARAMETERIZED ROUTES MUST COME LAST
 
-// Get single course by ID or destinationId - THIS COMES LAST
+// Get single course by ID or destinationId - THIS COMES LAST (IMPROVED VERSION)
 router.get('/courses/:id', authMiddleware, async (req, res) => {
   try {
     const courseId = req.params.id;
@@ -227,7 +227,7 @@ router.get('/courses/:id', authMiddleware, async (req, res) => {
     console.log(`🔍 Looking for course with ID: ${courseId}`);
     
     // Skip if this is a special route that should have been caught earlier
-    if (['notification-counts', 'destinations', 'debug'].includes(courseId)) {
+    if (['notification-counts', 'destinations', 'debug', 'validate-masterclass-access'].includes(courseId)) {
       return res.status(404).json({ 
         success: false, 
         message: 'Course not found' 
@@ -236,39 +236,47 @@ router.get('/courses/:id', authMiddleware, async (req, res) => {
     
     let course = null;
     
-    // Simple case-insensitive search without isActive filter
+    // 🚨 CRITICAL FIX: First try to find by destinationId (case-insensitive) - IMPROVED LOGIC
     course = await Course.findOne({ 
-      destinationId: { $regex: new RegExp(`^${courseId}$`, 'i') }
+      destinationId: { $regex: new RegExp('^' + courseId + '$', 'i') }
     });
     
-    console.log(`🔍 Course found:`, course ? `${course.name} (${course.destinationId})` : 'No');
+    console.log(`🔍 Course found by destinationId:`, course ? `${course.name} (${course.destinationId})` : 'No');
     
+    // 🚨 CRITICAL FIX: If not found by destinationId, try by ObjectId
+    if (!course && mongoose.Types.ObjectId.isValid(courseId)) {
+      course = await Course.findById(courseId);
+      console.log(`🔍 Course found by ObjectId:`, course ? `${course.name}` : 'No');
+    }
+    
+    // 🚨 CRITICAL FIX: If still not found, try by name (case-insensitive)
     if (!course) {
-      // Try ObjectId as fallback
-      if (mongoose.Types.ObjectId.isValid(courseId)) {
-        course = await Course.findById(courseId);
-      }
+      course = await Course.findOne({ 
+        name: { $regex: new RegExp(courseId, 'i') }
+      });
+      console.log(`🔍 Course found by name:`, course ? `${course.name}` : 'No');
     }
     
     if (!course) {
-      console.log(`❌ Course not found with ID: ${courseId}`);
+      console.log(`❌ Course not found with any method for ID: ${courseId}`);
       return res.status(404).json({ 
         success: false, 
         message: 'Course not found' 
       });
     }
     
-    console.log(`✅ SUCCESS: Course found: ${course.name}`);
+    console.log(`✅ SUCCESS: Course found: ${course.name} (${course.destinationId})`);
     
     res.json({ 
       success: true, 
       course
     });
   } catch (error) {
-    console.error('Error fetching course:', error);
+    console.error('❌ Error fetching course:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Error fetching course' 
+      message: 'Error fetching course details',
+      error: error.message 
     });
   }
 });

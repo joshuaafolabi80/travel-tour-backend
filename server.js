@@ -50,6 +50,51 @@ app.use('/api/messages', messageRoutes);
 const communityRoutes = require('./routes/communityRoutes');
 app.use('/api/community', communityRoutes);
 
+// 🚨 CRITICAL FIX: Add this route to handle course lookup by destinationId - ADDED BEFORE COURSE ROUTES
+app.get('/api/courses/destination/:destinationId', authMiddleware, async (req, res) => {
+  try {
+    const destinationId = req.params.destinationId;
+    console.log('🎯 Looking up course by destinationId:', destinationId);
+    
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database temporarily unavailable'
+      });
+    }
+
+    const Course = require('./models/Course');
+    
+    // Find course by destinationId (case-insensitive)
+    const course = await Course.findOne({ 
+      destinationId: { $regex: new RegExp('^' + destinationId + '$', 'i') }
+    });
+    
+    if (!course) {
+      console.log(`❌ Course not found for destinationId: ${destinationId}`);
+      return res.status(404).json({ 
+        success: false, 
+        message: `Course with destinationId '${destinationId}' not found` 
+      });
+    }
+    
+    console.log(`✅ Course found: ${course.name} (${course.destinationId})`);
+    
+    res.json({
+      success: true,
+      course: course
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching course by destinationId:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching course details',
+      error: error.message
+    });
+  }
+});
+
 // ADDED: API ENDPOINTS FOR CERTIFICATE ENHANCEMENT
 // Get user by email
 app.get('/api/users/email/:email', async (req, res) => {
@@ -416,6 +461,96 @@ app.put('/api/course-results/mark-read', async (req, res) => {
       message: 'Error marking course results as read',
       error: error.message
     });
+  }
+});
+
+// 🚨 CRITICAL FIX: ADD DEBUG ROUTES BEFORE COURSE-BY-ID ROUTE
+
+// DEBUG: Check all available courses
+app.get('/api/debug/courses', async (req, res) => {
+  try {
+    console.log('🔍 DEBUG: Checking all courses in database...');
+    
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database temporarily unavailable'
+      });
+    }
+
+    const Course = require('./models/Course');
+    const courses = await Course.find({});
+    
+    console.log(`📊 Found ${courses.length} total courses:`);
+    courses.forEach(course => {
+      console.log(`   - ${course.name} (ID: ${course._id}, destinationId: ${course.destinationId})`);
+    });
+
+    res.json({
+      success: true,
+      totalCourses: courses.length,
+      courses: courses.map(c => ({
+        id: c._id,
+        name: c.name,
+        destinationId: c.destinationId,
+        continent: c.continent,
+        heroImage: c.heroImage,
+        about: c.about,
+        enrollmentCount: c.enrollmentCount
+      }))
+    });
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({ success: false, message: 'Debug error' });
+  }
+});
+
+// DEBUG: Test specific course lookup
+app.get('/api/debug/courses/lookup/:id', async (req, res) => {
+  try {
+    const courseId = req.params.id;
+    console.log('🔍 DEBUG: Looking up course:', courseId);
+    
+    const Course = require('./models/Course');
+    
+    // Try different lookup methods
+    const byDestinationId = await Course.findOne({ 
+      destinationId: { $regex: new RegExp('^' + courseId + '$', 'i') }
+    });
+    
+    const byObjectId = mongoose.Types.ObjectId.isValid(courseId) 
+      ? await Course.findById(courseId)
+      : null;
+      
+    const byName = await Course.findOne({ 
+      name: { $regex: new RegExp(courseId, 'i') }
+    });
+    
+    res.json({
+      success: true,
+      lookupId: courseId,
+      results: {
+        byDestinationId: byDestinationId ? {
+          id: byDestinationId._id,
+          name: byDestinationId.name,
+          destinationId: byDestinationId.destinationId
+        } : null,
+        byObjectId: byObjectId ? {
+          id: byObjectId._id,
+          name: byObjectId.name,
+          destinationId: byObjectId.destinationId
+        } : null,
+        byName: byName ? {
+          id: byName._id,
+          name: byName.name,
+          destinationId: byName.destinationId
+        } : null
+      },
+      found: !!(byDestinationId || byObjectId || byName)
+    });
+  } catch (error) {
+    console.error('Debug lookup error:', error);
+    res.status(500).json({ success: false, message: 'Debug lookup error' });
   }
 });
 
