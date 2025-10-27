@@ -1,4 +1,4 @@
-// server/models/User.js (updated version)
+// server/models/User.js (FIXED VERSION - NO CONFLICTS)
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
@@ -110,7 +110,16 @@ const userSchema = new mongoose.Schema({
   accessibleMasterclassCourses: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'DocumentCourse'
-  }]
+  }],
+  
+  // 🚨 FIXED: Renamed to avoid conflict with array field above
+  masterclassVideoAccess: {
+    type: Boolean,
+    default: false
+  },
+  masterclassVideoAccessGrantedAt: {
+    type: Date
+  }
 }, {
   timestamps: true
 });
@@ -253,6 +262,36 @@ userSchema.methods.getAccessibleMasterclassCourses = function() {
   return this.accessibleMasterclassCourses;
 };
 
+// 🚨 FIXED: Methods for simple masterclass access (for video system) - UPDATED FIELD NAMES
+
+// Method to grant masterclass access FOR VIDEOS
+userSchema.methods.grantMasterclassAccess = function() {
+  this.masterclassVideoAccess = true;
+  this.masterclassVideoAccessGrantedAt = new Date();
+  return this.save();
+};
+
+// Method to revoke masterclass access FOR VIDEOS
+userSchema.methods.revokeMasterclassAccessSimple = function() {
+  this.masterclassVideoAccess = false;
+  this.masterclassVideoAccessGrantedAt = null;
+  return this.save();
+};
+
+// Method to check if user has masterclass access FOR VIDEOS
+userSchema.methods.hasMasterclassAccessSimple = function() {
+  return this.masterclassVideoAccess === true;
+};
+
+// Method to get masterclass access info FOR VIDEOS
+userSchema.methods.getMasterclassAccessInfo = function() {
+  return {
+    hasAccess: this.masterclassVideoAccess,
+    grantedAt: this.masterclassVideoAccessGrantedAt,
+    isActive: this.masterclassVideoAccess === true
+  };
+};
+
 // Method to get total notification count
 userSchema.methods.getTotalNotificationCount = function() {
   return this.unreadMessages + this.generalCoursesCount + this.masterclassCoursesCount;
@@ -270,6 +309,8 @@ userSchema.methods.getCourseStats = function() {
     masterclassCoursesCount: this.masterclassCoursesCount,
     masterclassAccessCount: activeMasterclassAccesses.length,
     accessibleMasterclassCoursesCount: this.accessibleMasterclassCourses.length,
+    masterclassVideoAccess: this.masterclassVideoAccess, // 🚨 FIXED: Updated field name
+    masterclassVideoAccessGrantedAt: this.masterclassVideoAccessGrantedAt, // 🚨 FIXED: Updated field name
     totalNotifications: this.getTotalNotificationCount(),
     lastNotificationCheck: this.lastCourseNotificationCheck
   };
@@ -325,6 +366,7 @@ userSchema.index({ 'masterclassAccess.courseId': 1 });
 userSchema.index({ 'masterclassAccess.expiresAt': 1 });
 userSchema.index({ lastCourseNotificationCheck: 1 });
 userSchema.index({ accessibleMasterclassCourses: 1 });
+userSchema.index({ masterclassVideoAccess: 1 }); // 🚨 FIXED: Updated field name
 
 // Transform output to remove password and sensitive data
 userSchema.methods.toJSON = function() {
@@ -338,6 +380,7 @@ userSchema.methods.toJSON = function() {
   user.fullName = this.fullName;
   user.displayName = this.displayName;
   user.isNewUser = this.isNewUser;
+  user.hasMasterclassAccess = this.hasMasterclassAccessSimple(); // ✅ Uses the method
   
   return user;
 };
@@ -347,6 +390,11 @@ userSchema.statics.findByRole = function(role) {
   return this.find({ role, active: true });
 };
 
+// 🚨 FIXED: Static method to find users with masterclass access
+userSchema.statics.findWithMasterclassAccess = function() {
+  return this.find({ masterclassVideoAccess: true, active: true });
+};
+
 // Static method to get user statistics
 userSchema.statics.getPlatformStats = async function() {
   const [
@@ -354,7 +402,8 @@ userSchema.statics.getPlatformStats = async function() {
     activeUsers,
     students,
     admins,
-    newUsersThisWeek
+    newUsersThisWeek,
+    usersWithMasterclassAccess // 🚨 FIXED: Updated field name
   ] = await Promise.all([
     this.countDocuments(),
     this.countDocuments({ active: true }),
@@ -362,7 +411,8 @@ userSchema.statics.getPlatformStats = async function() {
     this.countDocuments({ role: 'admin', active: true }),
     this.countDocuments({ 
       createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } 
-    })
+    }),
+    this.countDocuments({ masterclassVideoAccess: true, active: true }) // 🚨 FIXED: Updated field name
   ]);
   
   return {
@@ -370,7 +420,8 @@ userSchema.statics.getPlatformStats = async function() {
     activeUsers,
     students,
     admins,
-    newUsersThisWeek
+    newUsersThisWeek,
+    usersWithMasterclassAccess
   };
 };
 

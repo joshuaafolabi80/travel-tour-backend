@@ -52,6 +52,34 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
+// 🚨 ADDED: Admin middleware - check if user is admin
+const adminMiddleware = (req, res, next) => {
+  try {
+    // Check if user is authenticated and is admin
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin privileges required.'
+      });
+    }
+
+    next();
+  } catch (error) {
+    console.error('Admin middleware error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error in admin verification'
+    });
+  }
+};
+
 // Route to handle user registration
 router.post('/register', async (req, res) => {
   try {
@@ -343,5 +371,6 @@ router.get('/verify', authMiddleware, async (req, res) => {
 
 module.exports = {
   router,
-  authMiddleware, // <-- This is the critical export used by messages.js
+  authMiddleware,
+  adminMiddleware  // 🚨 ADDED: Now adminMiddleware is exported
 };
