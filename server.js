@@ -1,4 +1,4 @@
-// server.js - COMPLETE FIXED VERSION WITH LARGE VIDEO UPLOAD SUPPORT
+// server.js - COMPLETE INTEGRATED VERSION WITH ALL FEATURES
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -19,9 +19,14 @@ cloudinary.config({
 
 const app = express();
 
-// Middleware - INCREASED LIMITS FOR LARGE VIDEOS
+// Middleware - FINAL CORS CONFIGURATION FOR PRODUCTION WITH LARGE VIDEO UPLOAD SUPPORT
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174'],
+  origin: [
+    "http://localhost:5173", 
+    "http://localhost:5174",
+    "https://the-conclave-academy.netlify.app", // Your Netlify frontend URL
+    "https://travel-tour-academy-backend.onrender.com" // Your backend URL
+  ],
   credentials: true
 }));
 app.use(express.json({ limit: '500mb' })); // Increased for large videos
@@ -40,6 +45,9 @@ app.use((req, res, next) => {
 // Serve uploaded files statically
 app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/uploads/courses/images', express.static(path.join(__dirname, 'uploads', 'courses', 'images')));
+
+// ADDED: Serve static files from React build
+app.use(express.static(path.join(__dirname, '../dist')));
 
 // Public Routes (no auth required)
 const { router: authRouter, authMiddleware } = require('./routes/auth');
@@ -1420,7 +1428,8 @@ app.get('/api/test', (req, res) => {
       courses: 'Exists (6 documents)',
       users: 'Exists (4 documents)',
       course_results: 'Exists (new collection)',
-      general_course_questions: 'Exists (2 documents)'
+      general_course_questions: 'Exists (2 documents)',
+      videos: 'Exists (video courses collection)'
     }
   });
 });
@@ -1497,7 +1506,10 @@ app.get('/api/debug-routes', (req, res) => {
     '/api/admin/videos',
     '/api/admin/videos/:id',
     // DEBUG ROUTES
-    '/api/debug/upload-test'
+    '/api/debug/upload-test',
+    '/api/debug/courses',
+    '/api/debug/courses/lookup/:id',
+    '/api/debug/quiz-collections'
   ];
   
   console.log('🐛 DEBUG: Listing available routes');
@@ -2158,9 +2170,9 @@ app.get('/api/notifications/counts', async (req, res) => {
 });
 
 // ADDED: MARK ADMIN MESSAGES AS READ ROUTE
-app.put('/api/notifications/mark-admin-messages-read', async (req, res) => {
+app.put('/api/notifications/mark-admin-messages-read', authMiddleware, async (req, res) => {
   try {
-    const userId = req.body.userId;
+    const userId = req.user._id;
     
     console.log(`🔒 MARKING admin messages as read for user: ${userId}`);
     
@@ -2618,6 +2630,13 @@ app.get('/api/debug/quiz-by-destination', async (req, res) => {
   }
 });
 
+// ADDED: Handle client-side routing - MUST BE AFTER ALL API ROUTES BUT BEFORE ERROR HANDLERS
+app.get('*', (req, res) => {
+  if (!req.path.startsWith('/api')) {
+    res.sendFile(path.join(__dirname, '../dist/index.html'));
+  }
+});
+
 // IMPROVED MONGODB CONNECTION WITH RETRY LOGIC
 const connectWithRetry = async (retries = 5, delay = 5000) => {
   console.log('🔄 Attempting to connect to MongoDB...');
@@ -2726,21 +2745,28 @@ app.use((error, req, res, next) => {
   });
 });
 
-// 404 handler
+// 404 handler - UPDATED to handle API routes properly
 app.use('*', (req, res) => {
-  console.log(`🔍 404 - Route not found: ${req.originalUrl}`);
-  res.status(404).json({
-    success: false,
-    message: 'API endpoint not found',
-    requestedUrl: req.originalUrl
-  });
+  if (req.path.startsWith('/api')) {
+    console.log(`🔍 404 - API endpoint not found: ${req.originalUrl}`);
+    return res.status(404).json({
+      success: false,
+      message: 'API endpoint not found',
+      requestedUrl: req.originalUrl
+    });
+  }
 });
 
 // Initialize Socket.io - UPDATED VERSION WITH PERSISTENT CALLS
 const initializeSocket = (server) => {
   const io = new Server(server, {
     cors: {
-      origin: ["http://localhost:5173", "http://localhost:5174"],
+      origin: [
+        "http://localhost:5173", 
+        "http://localhost:5174",
+        "https://the-conclave-academy.netlify.app", // Your Netlify frontend URL
+        "https://travel-tour-academy-backend.onrender.com" // Your backend URL
+      ],
       methods: ["GET", "POST"],
       credentials: true
     }
@@ -3013,6 +3039,7 @@ const startServer = async () => {
       console.log(`\n🎉 Server running on port ${PORT}`);
       console.log(`📍 API available at: http://localhost:${PORT}/api`);
       console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+      console.log(`📍 Frontend served from: http://localhost:${PORT}`);
       console.log(`\n🎓 ENHANCED CERTIFICATE ENDPOINTS:`);
       console.log(`📍   Get user by email: http://localhost:${PORT}/api/users/email/:email`);
       console.log(`📍   Get user by username: http://localhost:${PORT}/api/users/username/:username`);
@@ -3078,6 +3105,8 @@ const startServer = async () => {
       console.log('🎥 Video system: Cloudinary integration for video storage and streaming');
       console.log('📊 Video counts: New endpoints for accurate badge notifications');
       console.log('👥 Community features: Real-time messaging and voice calls enabled');
+      console.log('🌐 CORS configured for production: the-conclave-academy.netlify.app and travel-tour-academy-backend.onrender.com');
+      console.log('📦 Frontend static files served from: ../dist directory');
       console.log('\n🚀 LARGE VIDEO UPLOAD SUPPORT ENABLED:');
       console.log('✅ 2GB file size limit');
       console.log('✅ 10-minute timeout for uploads');

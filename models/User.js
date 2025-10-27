@@ -1,4 +1,4 @@
-// server/models/User.js (FIXED VERSION - NO CONFLICTS)
+// server/models/User.js (COMPLETE INTEGRATED VERSION)
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
@@ -112,7 +112,7 @@ const userSchema = new mongoose.Schema({
     ref: 'DocumentCourse'
   }],
   
-  // 🚨 FIXED: Renamed to avoid conflict with array field above
+  // 🚨 VIDEO-SPECIFIC FIELDS FROM FIRST FILE
   masterclassVideoAccess: {
     type: Boolean,
     default: false
@@ -230,7 +230,7 @@ userSchema.methods.getActiveMasterclassAccesses = function() {
   );
 };
 
-// Method to revoke masterclass access
+// Method to revoke masterclass access (for specific course access)
 userSchema.methods.revokeMasterclassAccess = function(courseId, courseType) {
   const accessIndex = this.masterclassAccess.findIndex(access => 
     access.courseId.equals(courseId) && access.courseType === courseType
@@ -262,23 +262,23 @@ userSchema.methods.getAccessibleMasterclassCourses = function() {
   return this.accessibleMasterclassCourses;
 };
 
-// 🚨 FIXED: Methods for simple masterclass access (for video system) - UPDATED FIELD NAMES
+// 🚨 VIDEO-SPECIFIC METHODS FROM FIRST FILE
 
-// Method to grant masterclass access FOR VIDEOS
-userSchema.methods.grantMasterclassAccess = function() {
+// Method to grant masterclass access FOR VIDEOS (simple boolean access)
+userSchema.methods.grantMasterclassAccessSimple = function() {
   this.masterclassVideoAccess = true;
   this.masterclassVideoAccessGrantedAt = new Date();
   return this.save();
 };
 
-// Method to revoke masterclass access FOR VIDEOS
+// Method to revoke masterclass access FOR VIDEOS (simple boolean access)
 userSchema.methods.revokeMasterclassAccessSimple = function() {
   this.masterclassVideoAccess = false;
   this.masterclassVideoAccessGrantedAt = null;
   return this.save();
 };
 
-// Method to check if user has masterclass access FOR VIDEOS
+// Method to check if user has masterclass access FOR VIDEOS (simple boolean access)
 userSchema.methods.hasMasterclassAccessSimple = function() {
   return this.masterclassVideoAccess === true;
 };
@@ -309,8 +309,8 @@ userSchema.methods.getCourseStats = function() {
     masterclassCoursesCount: this.masterclassCoursesCount,
     masterclassAccessCount: activeMasterclassAccesses.length,
     accessibleMasterclassCoursesCount: this.accessibleMasterclassCourses.length,
-    masterclassVideoAccess: this.masterclassVideoAccess, // 🚨 FIXED: Updated field name
-    masterclassVideoAccessGrantedAt: this.masterclassVideoAccessGrantedAt, // 🚨 FIXED: Updated field name
+    masterclassVideoAccess: this.masterclassVideoAccess,
+    masterclassVideoAccessGrantedAt: this.masterclassVideoAccessGrantedAt,
     totalNotifications: this.getTotalNotificationCount(),
     lastNotificationCheck: this.lastCourseNotificationCheck
   };
@@ -366,7 +366,7 @@ userSchema.index({ 'masterclassAccess.courseId': 1 });
 userSchema.index({ 'masterclassAccess.expiresAt': 1 });
 userSchema.index({ lastCourseNotificationCheck: 1 });
 userSchema.index({ accessibleMasterclassCourses: 1 });
-userSchema.index({ masterclassVideoAccess: 1 }); // 🚨 FIXED: Updated field name
+userSchema.index({ masterclassVideoAccess: 1 }); // 🚨 VIDEO-SPECIFIC INDEX
 
 // Transform output to remove password and sensitive data
 userSchema.methods.toJSON = function() {
@@ -380,7 +380,7 @@ userSchema.methods.toJSON = function() {
   user.fullName = this.fullName;
   user.displayName = this.displayName;
   user.isNewUser = this.isNewUser;
-  user.hasMasterclassAccess = this.hasMasterclassAccessSimple(); // ✅ Uses the method
+  user.hasMasterclassAccess = this.hasMasterclassAccessSimple(); // ✅ Uses the video access method
   
   return user;
 };
@@ -390,7 +390,7 @@ userSchema.statics.findByRole = function(role) {
   return this.find({ role, active: true });
 };
 
-// 🚨 FIXED: Static method to find users with masterclass access
+// 🚨 VIDEO-SPECIFIC STATIC METHOD FROM FIRST FILE
 userSchema.statics.findWithMasterclassAccess = function() {
   return this.find({ masterclassVideoAccess: true, active: true });
 };
@@ -403,7 +403,7 @@ userSchema.statics.getPlatformStats = async function() {
     students,
     admins,
     newUsersThisWeek,
-    usersWithMasterclassAccess // 🚨 FIXED: Updated field name
+    usersWithMasterclassAccess // 🚨 VIDEO-SPECIFIC STAT
   ] = await Promise.all([
     this.countDocuments(),
     this.countDocuments({ active: true }),
@@ -412,7 +412,7 @@ userSchema.statics.getPlatformStats = async function() {
     this.countDocuments({ 
       createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } 
     }),
-    this.countDocuments({ masterclassVideoAccess: true, active: true }) // 🚨 FIXED: Updated field name
+    this.countDocuments({ masterclassVideoAccess: true, active: true }) // 🚨 VIDEO-SPECIFIC
   ]);
   
   return {

@@ -371,6 +371,6 @@ router.get('/verify', authMiddleware, async (req, res) => {
 
 module.exports = {
   router,
-  authMiddleware,
-  adminMiddleware  // 🚨 ADDED: Now adminMiddleware is exported
+  authMiddleware, // Critical export used by messages.js and other routes
+  adminMiddleware  // 🚨 ADDED: Now adminMiddleware is exported for admin routes
 };
