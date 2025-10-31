@@ -1,20 +1,22 @@
 // server/socket.js
-const socketIo = require('socket.io');
+const { Server } = require('socket.io');
 
 let io;
 const activeCalls = new Map();
 const userSockets = new Map();
+const communityMessages = [];
 
 const initializeSocket = (server) => {
-  io = socketIo(server, {
+  io = new Server(server, {
     cors: {
       origin: [
         "http://localhost:5173", 
         "http://localhost:5174",
-        "https://the-conclave-academy.netlify.app", // Your Netlify frontend URL
-        "https://travel-tour-academy-backend.onrender.com" // Your backend URL
+        "https://the-conclave-academy.netlify.app",
+        "https://travel-tour-academy-backend.onrender.com"
       ],
-      methods: ["GET", "POST"]
+      methods: ["GET", "POST"],
+      credentials: true
     }
   });
 
@@ -24,77 +26,158 @@ const initializeSocket = (server) => {
     // User joins the community
     socket.on('user_join', (userData) => {
       userSockets.set(socket.id, {
+        socketId: socket.id,
         userId: userData.userId,
         userName: userData.userName,
-        role: userData.role,
-        socketId: socket.id
+        role: userData.role
       });
       
-      console.log(`👤 ${userData.userName} joined community`);
+      console.log(`👤 ${userData.userName} (${userData.role}) joined community with socket ID: ${socket.id}`);
       
-      // Notify admin about new user (if admin is online)
+      // Send current active calls to the user
+      if (activeCalls.size > 0) {
+        activeCalls.forEach((call, callId) => {
+          if (call.isActive) {
+            socket.emit('call_started', {
+              callId,
+              adminName: call.adminName,
+              message: `${call.adminName} has an active community call`,
+              startTime: call.startTime,
+              withAudio: true
+            });
+          }
+        });
+      }
+      
+      // Send message history
+      if (communityMessages.length > 0) {
+        socket.emit('message_history', communityMessages.slice(-50));
+      }
+      
+      // Broadcast to all users that someone joined
       socket.broadcast.emit('user_online', {
         userName: userData.userName,
-        userId: userData.userId
+        userId: userData.userId,
+        role: userData.role,
+        socketId: socket.id
       });
     });
 
     // Admin starts a community call
     socket.on('admin_start_call', (callData) => {
-      const callId = `call_${Date.now()}`;
+      const callId = `community_call_${Date.now()}`;
+      const adminUser = userSockets.get(socket.id);
+      
+      if (!adminUser || adminUser.role !== 'admin') {
+        socket.emit('error', { message: 'Only admins can start calls' });
+        return;
+      }
+
       const call = {
         id: callId,
-        adminId: callData.adminId,
-        adminName: callData.adminName,
-        participants: new Set([socket.id]),
+        adminId: adminUser.userId,
+        adminName: adminUser.userName,
+        participants: new Map([[socket.id, adminUser]]),
         startTime: new Date(),
-        isActive: true
+        isActive: true,
+        createdAt: new Date(),
+        withAudio: callData.withAudio || true
       };
       
       activeCalls.set(callId, call);
       
-      // Notify all users about the call
+      console.log(`📞 Admin ${adminUser.userName} started call: ${callId} with WebRTC audio`);
+      
+      // Add admin as first participant
+      socket.join(callId);
+      
+      // Notify ALL users about the call
       io.emit('call_started', {
         callId,
-        adminName: callData.adminName,
-        message: 'Admin has started a community call'
+        adminName: adminUser.userName,
+        message: `${adminUser.userName} has started a community call with voice chat`,
+        startTime: call.startTime,
+        persistent: true,
+        withAudio: true
       });
       
-      console.log(`📞 Admin ${callData.adminName} started call: ${callId}`);
+      // Send current participants to admin
+      socket.emit('call_participants_update', {
+        callId,
+        participants: Array.from(call.participants.values())
+      });
     });
 
     // User joins a call
     socket.on('join_call', (data) => {
       const call = activeCalls.get(data.callId);
-      if (call && call.isActive) {
-        call.participants.add(socket.id);
-        
-        // Notify all participants about new user
-        io.to(data.callId).emit('user_joined_call', {
-          userName: data.userName,
-          userId: data.userId,
-          participantCount: call.participants.size
-        });
-        
-        console.log(`👤 ${data.userName} joined call: ${data.callId}`);
+      const user = userSockets.get(socket.id);
+      
+      if (!call || !call.isActive) {
+        socket.emit('error', { message: 'Call not found or ended' });
+        return;
       }
+
+      if (!user) {
+        socket.emit('error', { message: 'User not registered' });
+        return;
+      }
+
+      // Add user to call participants
+      call.participants.set(socket.id, user);
+      socket.join(data.callId);
+      
+      console.log(`👤 ${user.userName} joined call: ${data.callId} with WebRTC audio`);
+      
+      // Notify all participants in the call about new user
+      io.to(data.callId).emit('user_joined_call', {
+        userName: user.userName,
+        userId: user.userId,
+        role: user.role,
+        socketId: socket.id,
+        participantCount: call.participants.size
+      });
+      
+      // Send updated participants list to everyone in call
+      io.to(data.callId).emit('call_participants_update', {
+        callId: data.callId,
+        participants: Array.from(call.participants.values())
+      });
+
+      // Notify existing participants to establish WebRTC with new user
+      socket.to(data.callId).emit('webrtc_new_participant', {
+        socketId: socket.id,
+        userName: user.userName
+      });
     });
 
     // User leaves a call
     socket.on('leave_call', (data) => {
       const call = activeCalls.get(data.callId);
-      if (call) {
+      const user = userSockets.get(socket.id);
+      
+      if (call && user) {
         call.participants.delete(socket.id);
+        socket.leave(data.callId);
+        
+        console.log(`👤 ${user.userName} left call: ${data.callId}`);
         
         // Notify remaining participants
         socket.to(data.callId).emit('user_left_call', {
-          userName: data.userName,
+          userName: user.userName,
+          socketId: socket.id,
           participantCount: call.participants.size
         });
         
-        // If no participants left, end the call
+        // Send updated participants list
+        io.to(data.callId).emit('call_participants_update', {
+          callId: data.callId,
+          participants: Array.from(call.participants.values())
+        });
+        
+        // If no participants left, keep call active for others to join
         if (call.participants.size === 0) {
-          activeCalls.delete(data.callId);
+          console.log(`📞 Call ${data.callId} has no participants, but remains active`);
         }
       }
     });
@@ -102,15 +185,21 @@ const initializeSocket = (server) => {
     // Admin ends the call
     socket.on('admin_end_call', (data) => {
       const call = activeCalls.get(data.callId);
-      if (call) {
+      const adminUser = userSockets.get(socket.id);
+      
+      if (call && adminUser && adminUser.role === 'admin' && call.adminId === adminUser.userId) {
         // Notify all participants
         io.emit('call_ended', {
           callId: data.callId,
-          message: 'Call has been ended by admin'
+          message: 'Call has been ended by admin',
+          endedBy: adminUser.userName
         });
         
+        // Remove all participants from the room
+        io.socketsLeave(data.callId);
         activeCalls.delete(data.callId);
-        console.log(`📞 Call ended: ${data.callId}`);
+        
+        console.log(`📞 Call ended by admin: ${data.callId}`);
       }
     });
 
@@ -119,7 +208,7 @@ const initializeSocket = (server) => {
       const user = userSockets.get(socket.id);
       if (user) {
         const message = {
-          id: `msg_${Date.now()}`,
+          id: `msg_${Date.now()}_${socket.id}`,
           sender: user.userName,
           senderId: user.userId,
           text: messageData.text,
@@ -128,14 +217,28 @@ const initializeSocket = (server) => {
           callId: messageData.callId || null
         };
         
-        // Broadcast message to all users
-        io.emit('new_message', message);
+        // Store message persistently
+        communityMessages.push(message);
+        
+        // Keep only last 1000 messages
+        if (communityMessages.length > 1000) {
+          communityMessages.splice(0, communityMessages.length - 1000);
+        }
+        
+        // Broadcast message
+        if (messageData.callId) {
+          io.to(messageData.callId).emit('new_message', message);
+        } else {
+          io.emit('new_message', message);
+        }
+        
         console.log(`💬 ${user.userName}: ${messageData.text}`);
       }
     });
 
-    // WebRTC signaling for voice/video
+    // WebRTC signaling handlers
     socket.on('webrtc_offer', (data) => {
+      console.log(`📤 WebRTC offer from ${socket.id} to ${data.targetSocketId}`);
       socket.to(data.targetSocketId).emit('webrtc_offer', {
         offer: data.offer,
         senderSocketId: socket.id,
@@ -144,6 +247,7 @@ const initializeSocket = (server) => {
     });
 
     socket.on('webrtc_answer', (data) => {
+      console.log(`📤 WebRTC answer from ${socket.id} to ${data.targetSocketId}`);
       socket.to(data.targetSocketId).emit('webrtc_answer', {
         answer: data.answer,
         senderSocketId: socket.id
@@ -151,19 +255,19 @@ const initializeSocket = (server) => {
     });
 
     socket.on('webrtc_ice_candidate', (data) => {
+      console.log(`🧊 WebRTC ICE candidate from ${socket.id} to ${data.targetSocketId}`);
       socket.to(data.targetSocketId).emit('webrtc_ice_candidate', {
         candidate: data.candidate,
         senderSocketId: socket.id
       });
     });
 
-    // Admin mutes all participants
-    socket.on('admin_mute_all', (data) => {
-      const call = activeCalls.get(data.callId);
-      if (call && call.adminId === data.adminId) {
-        socket.to(data.callId).emit('all_muted_by_admin');
-        console.log(`🔇 Admin muted all participants in call: ${data.callId}`);
-      }
+    // Notify about new participant for WebRTC
+    socket.on('webrtc_new_participant', (data) => {
+      socket.to(data.callId).emit('webrtc_new_participant', {
+        socketId: socket.id,
+        userName: data.userName
+      });
     });
 
     // Handle disconnection
@@ -180,16 +284,23 @@ const initializeSocket = (server) => {
             // Notify other participants
             socket.to(callId).emit('user_left_call', {
               userName: user.userName,
+              socketId: socket.id,
               participantCount: call.participants.size
             });
             
-            // If admin disconnects, end the call
+            // Send updated participants list
+            io.to(callId).emit('call_participants_update', {
+              callId: callId,
+              participants: Array.from(call.participants.values())
+            });
+            
+            // If admin disconnects, keep call active but notify
             if (call.adminId === user.userId) {
-              io.emit('call_ended', {
+              io.emit('call_admin_away', {
                 callId: callId,
-                message: 'Call ended because admin disconnected'
+                message: 'Admin has left the call, but call remains active',
+                adminName: user.userName
               });
-              activeCalls.delete(callId);
             }
           }
         });

@@ -1,4 +1,4 @@
-// server.js - COMPLETE INTEGRATED VERSION WITH ALL FEATURES
+// server.js - COMPLETE INTEGRATED VERSION WITH WEBRTC AUDIO SUPPORT
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -19,17 +19,17 @@ cloudinary.config({
 
 const app = express();
 
-// Middleware - FINAL CORS CONFIGURATION FOR PRODUCTION WITH LARGE VIDEO UPLOAD SUPPORT
+// Middleware - CORS CONFIGURATION FOR PRODUCTION WITH LARGE VIDEO UPLOAD SUPPORT
 app.use(cors({
   origin: [
     "http://localhost:5173", 
     "http://localhost:5174",
-    "https://the-conclave-academy.netlify.app", // Your Netlify frontend URL
-    "https://travel-tour-academy-backend.onrender.com" // Your backend URL
+    "https://the-conclave-academy.netlify.app",
+    "https://travel-tour-academy-backend.onrender.com"
   ],
   credentials: true
 }));
-app.use(express.json({ limit: '500mb' })); // Increased for large videos
+app.use(express.json({ limit: '500mb' }));
 app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
 // ENHANCED REQUEST LOGGING MIDDLEWARE
@@ -70,7 +70,6 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
-    // Generate unique filename
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, 'video-' + uniqueSuffix + path.extname(file.originalname));
   }
@@ -79,11 +78,10 @@ const storage = multer.diskStorage({
 const upload = multer({ 
   storage: storage,
   limits: {
-    fileSize: 2 * 1024 * 1024 * 1024, // 2GB limit for 30-minute videos
-    fieldSize: 50 * 1024 * 1024 // 50MB for fields
+    fileSize: 2 * 1024 * 1024 * 1024,
+    fieldSize: 50 * 1024 * 1024
   },
   fileFilter: function (req, file, cb) {
-    // Check if file is a video
     if (file.mimetype.startsWith('video/')) {
       console.log(`✅ Accepting video file: ${file.originalname} (${(file.size / (1024 * 1024)).toFixed(2)}MB)`);
       cb(null, true);
@@ -94,7 +92,7 @@ const upload = multer({
   }
 });
 
-// 🚨 ADD: Video count endpoints for notifications - ADD BEFORE OTHER VIDEO ROUTES
+// 🚨 ADD: Video count endpoints for notifications
 app.get('/api/videos/count', async (req, res) => {
   try {
     console.log('📊 Fetching video counts for notifications');
@@ -108,13 +106,11 @@ app.get('/api/videos/count', async (req, res) => {
 
     const db = mongoose.connection.db;
     
-    // Count general videos
     const generalVideosCount = await db.collection('videos').countDocuments({ 
       videoType: 'general',
       isActive: true 
     });
     
-    // Count masterclass videos  
     const masterclassVideosCount = await db.collection('videos').countDocuments({ 
       videoType: 'masterclass',
       isActive: true 
@@ -161,10 +157,8 @@ app.get('/api/admin/videos/count', authMiddleware, async (req, res) => {
 
     const db = mongoose.connection.db;
     
-    // Count all videos (admin sees all)
     const totalVideosCount = await db.collection('videos').countDocuments({});
     
-    // Count by type
     const generalVideosCount = await db.collection('videos').countDocuments({ 
       videoType: 'general'
     });
@@ -203,15 +197,14 @@ app.get('/api/admin/videos/count', authMiddleware, async (req, res) => {
   }
 });
 
-// 🚨 CRITICAL FIX: VIDEO ROUTES MUST BE ADDED HERE - BEFORE OTHER ROUTES
+// 🚨 CRITICAL FIX: VIDEO ROUTES MUST BE ADDED HERE
 const videoRoutes = require('./routes/videos');
 const adminVideoRoutes = require('./routes/adminVideos');
 
-// 🚨 ADDED: Use video routes BEFORE other route imports
 app.use('/api', videoRoutes);
 app.use('/api/admin', adminVideoRoutes);
 
-// 🚨 ADDED: TEMPORARY ADMIN VIDEO ROUTES - These will handle the missing endpoints
+// 🚨 ADDED: TEMPORARY ADMIN VIDEO ROUTES
 app.get('/api/admin/videos', authMiddleware, async (req, res) => {
   try {
     console.log('🎥 ADMIN: Fetching videos with params:', req.query);
@@ -227,7 +220,6 @@ app.get('/api/admin/videos', authMiddleware, async (req, res) => {
     
     const db = mongoose.connection.db;
     
-    // Build query
     let query = {};
     if (videoType && videoType !== '') {
       query.videoType = videoType;
@@ -245,7 +237,6 @@ app.get('/api/admin/videos', authMiddleware, async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Get videos with pagination
     const videos = await db.collection('videos')
       .find(query)
       .sort({ createdAt: -1 })
@@ -253,7 +244,6 @@ app.get('/api/admin/videos', authMiddleware, async (req, res) => {
       .limit(limitNum)
       .toArray();
 
-    // Get total count
     const totalCount = await db.collection('videos').countDocuments(query);
 
     console.log(`✅ ADMIN: Found ${videos.length} videos out of ${totalCount} total`);
@@ -281,8 +271,7 @@ app.get('/api/admin/videos', authMiddleware, async (req, res) => {
 app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), async (req, res) => {
   console.log('🎥 ADMIN: Video upload request received - STARTING UPLOAD PROCESS');
   
-  // Set longer timeout for large video uploads (10 minutes)
-  req.setTimeout(10 * 60 * 1000); // 10 minutes
+  req.setTimeout(10 * 60 * 1000);
   
   try {
     if (mongoose.connection.readyState !== 1) {
@@ -292,7 +281,6 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
       });
     }
 
-    // Log the received data
     console.log('📦 Request body fields received:', req.body);
     console.log('📦 Uploaded file info:', req.file ? {
       originalname: req.file.originalname,
@@ -301,10 +289,8 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
       path: req.file.path
     } : 'No file received');
 
-    // Extract fields from form data - multer puts them in req.body
     const { title, description, videoType, category, accessCode } = req.body;
     
-    // Validate required fields
     if (!title || !description || !videoType) {
       console.log('❌ Missing required fields:', { 
         title: !!title, 
@@ -338,7 +324,6 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
 
     const db = mongoose.connection.db;
     
-    // Handle file upload to Cloudinary if file was uploaded
     let videoUrl = '';
     let thumbnailUrl = '';
     let cloudinaryPublicId = '';
@@ -346,7 +331,6 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
     console.log(`☁️ Starting Cloudinary upload for: ${req.file.originalname} (${(req.file.size / (1024 * 1024)).toFixed(2)}MB)`);
     
     try {
-      // FIX: Use upload_stream with progress tracking for large files
       const uploadResult = await new Promise((resolve, reject) => {
         let uploadStartTime = Date.now();
         
@@ -354,8 +338,8 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
           {
             resource_type: 'video',
             folder: 'travel-courses/videos',
-            chunk_size: 20 * 1024 * 1024, // 20MB chunks for large files
-            timeout: 600000, // 10 minute timeout for Cloudinary
+            chunk_size: 20 * 1024 * 1024,
+            timeout: 600000,
             eager: [
               { width: 400, height: 300, crop: "limit", format: "jpg" }
             ]
@@ -373,7 +357,6 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
           }
         );
         
-        // Create read stream with progress tracking
         const fileStream = fs.createReadStream(req.file.path);
         let bytesRead = 0;
         const totalBytes = req.file.size;
@@ -389,14 +372,12 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
           reject(error);
         });
         
-        // Pipe the file stream to Cloudinary
         fileStream.pipe(uploadStream);
       });
       
       videoUrl = uploadResult.secure_url;
       cloudinaryPublicId = uploadResult.public_id;
       
-      // Generate thumbnail from video (first frame)
       if (uploadResult.eager && uploadResult.eager.length > 0) {
         thumbnailUrl = uploadResult.eager[0].secure_url;
       } else {
@@ -407,7 +388,6 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
       console.log('✅ Video uploaded to Cloudinary successfully');
       console.log('✅ Thumbnail generated:', thumbnailUrl);
       
-      // Delete local file after successful upload
       try {
         fs.unlinkSync(req.file.path);
         console.log('✅ Local temporary file deleted');
@@ -418,7 +398,6 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
     } catch (cloudinaryError) {
       console.error('❌ Cloudinary upload error:', cloudinaryError);
       
-      // If Cloudinary fails, store locally and return local path
       videoUrl = `/api/uploads/videos/${path.basename(req.file.path)}`;
       thumbnailUrl = '';
       
@@ -426,7 +405,6 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
       console.log('💡 Video will be served from local storage');
     }
 
-    // Create video document
     const videoData = {
       title: title.trim(),
       description: description.trim(),
@@ -440,12 +418,11 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
       uploadedByUsername: req.user.username,
       videoUrl: videoUrl,
       thumbnailUrl: thumbnailUrl,
-      duration: 0, // You can extract this from the video file if needed
+      duration: 0,
       fileSize: req.file.size,
       fileName: req.file.originalname,
       fileFormat: req.file.mimetype,
       cloudinaryPublicId: cloudinaryPublicId,
-      // Add local file path if Cloudinary upload failed
       localFilePath: !videoUrl.startsWith('http') ? req.file.path : '',
       uploadMethod: videoUrl.startsWith('http') ? 'cloudinary' : 'local'
     };
@@ -471,7 +448,6 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
   } catch (error) {
     console.error('❌ Error uploading video:', error);
     
-    // Clean up uploaded file if error occurred
     if (req.file && fs.existsSync(req.file.path)) {
       try {
         fs.unlinkSync(req.file.path);
@@ -490,36 +466,6 @@ app.post('/api/admin/upload-video', authMiddleware, upload.single('videoFile'), 
   }
 });
 
-// TEMPORARY DEBUG ROUTE - Add this to test FormData
-app.post('/api/debug/upload-test', upload.single('videoFile'), async (req, res) => {
-  try {
-    console.log('🔍 DEBUG: Testing FormData reception');
-    console.log('📦 Request headers:', req.headers);
-    console.log('📦 Request body:', req.body);
-    console.log('📦 Request file:', req.file);
-    
-    // Clean up test file
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    
-    res.json({
-      success: true,
-      message: 'Debug received',
-      body: req.body,
-      file: req.file ? {
-        originalname: req.file.originalname,
-        size: req.file.size,
-        mimetype: req.file.mimetype
-      } : null,
-      headers: req.headers
-    });
-  } catch (error) {
-    console.error('Debug error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 app.put('/api/admin/videos/:id', authMiddleware, async (req, res) => {
   try {
     const videoId = req.params.id;
@@ -534,7 +480,6 @@ app.put('/api/admin/videos/:id', authMiddleware, async (req, res) => {
 
     const { title, description, category, isActive } = req.body;
     
-    // Validate required fields
     if (!title || !description) {
       return res.status(400).json({
         success: false,
@@ -596,7 +541,6 @@ app.delete('/api/admin/videos/:id', authMiddleware, async (req, res) => {
 
     const db = mongoose.connection.db;
     
-    // Get video before deleting to clean up files
     const video = await db.collection('videos').findOne(
       { _id: new mongoose.Types.ObjectId(videoId) }
     );
@@ -612,9 +556,7 @@ app.delete('/api/admin/videos/:id', authMiddleware, async (req, res) => {
       });
     }
 
-    // Clean up files
     if (video) {
-      // Delete from Cloudinary if uploaded there
       if (video.cloudinaryPublicId) {
         try {
           await cloudinary.uploader.destroy(video.cloudinaryPublicId, { resource_type: 'video' });
@@ -624,7 +566,6 @@ app.delete('/api/admin/videos/:id', authMiddleware, async (req, res) => {
         }
       }
       
-      // Delete local file if exists
       if (video.localFilePath && fs.existsSync(video.localFilePath)) {
         try {
           fs.unlinkSync(video.localFilePath);
@@ -681,7 +622,6 @@ app.get('/api/courses/destination/:destinationId', authMiddleware, async (req, r
 
     const Course = require('./models/Course');
     
-    // Find course by destinationId (case-insensitive)
     const course = await Course.findOne({ 
       destinationId: { $regex: new RegExp('^' + destinationId + '$', 'i') }
     });
@@ -736,7 +676,6 @@ app.get('/api/users/email/:email', async (req, res) => {
       });
     }
 
-    // Return only necessary fields for security
     const { _id, username, email: userEmail, name, role } = user;
     console.log('✅ User found:', username);
     
@@ -778,7 +717,6 @@ app.get('/api/users/username/:username', async (req, res) => {
       });
     }
 
-    // Return only necessary fields for security
     const { _id, username: userUsername, email, name, role } = user;
     console.log('✅ User found by username:', userUsername);
     
@@ -812,7 +750,6 @@ app.get('/api/courses/general/details', async (req, res) => {
 
     const db = mongoose.connection.db;
     
-    // Search in general_course_questions collection
     const course = await db.collection('general_course_questions').findOne({ 
       $or: [
         { title: { $regex: courseName, $options: 'i' } },
@@ -829,7 +766,6 @@ app.get('/api/courses/general/details', async (req, res) => {
       });
     }
     
-    // Return course details
     res.json({ 
       success: true, 
       course: { 
@@ -883,7 +819,6 @@ app.post('/api/course-results', async (req, res) => {
       courseType
     });
 
-    // Validate required fields
     if (!userName || !courseName || score === undefined || !totalQuestions) {
       return res.status(400).json({
         success: false,
@@ -893,7 +828,6 @@ app.post('/api/course-results', async (req, res) => {
 
     const CourseResult = require('./models/CourseResult');
     
-    // Helper function to get remark based on percentage
     const getRemark = (percent) => {
       if (percent >= 90) return "Excellent";
       if (percent >= 80) return "Very Good";
@@ -902,7 +836,6 @@ app.post('/api/course-results', async (req, res) => {
       return "Needs Improvement";
     };
 
-    // Create course result
     const courseResult = new CourseResult({
       userId: userId || 'anonymous',
       userName: userName,
@@ -1039,7 +972,6 @@ app.put('/api/course-results/mark-read', async (req, res) => {
     let updateResult;
     
     if (resultIds && Array.isArray(resultIds) && resultIds.length > 0) {
-      // Mark specific results as read
       updateResult = await CourseResult.updateMany(
         { _id: { $in: resultIds } },
         { 
@@ -1050,7 +982,6 @@ app.put('/api/course-results/mark-read', async (req, res) => {
         }
       );
     } else {
-      // Mark all unread results as read
       updateResult = await CourseResult.updateMany(
         { readByAdmin: { $ne: true } },
         { 
@@ -1129,7 +1060,6 @@ app.get('/api/debug/courses/lookup/:id', async (req, res) => {
     
     const Course = require('./models/Course');
     
-    // Try different lookup methods
     const byDestinationId = await Course.findOne({ 
       destinationId: { $regex: new RegExp('^' + courseId + '$', 'i') }
     });
@@ -1184,13 +1114,11 @@ app.get('/api/courses/notification-counts', async (req, res) => {
 
     const DocumentCourse = require('./models/DocumentCourse');
     
-    // Count general courses
     const generalCoursesCount = await DocumentCourse.countDocuments({ 
       courseType: 'general',
       isActive: true 
     });
     
-    // Count masterclass courses  
     const masterclassCoursesCount = await DocumentCourse.countDocuments({ 
       courseType: 'masterclass',
       isActive: true 
@@ -1244,7 +1172,6 @@ app.get('/api/notifications/admin-messages/:userId', async (req, res) => {
       });
     }
 
-    // For now, return empty messages - you can implement real message fetching later
     console.log(`✅ Admin messages count for user ${userId}: 0`);
 
     res.json({
@@ -1321,7 +1248,6 @@ app.get('/api/courses', async (req, res) => {
 
     const DocumentCourse = require('./models/DocumentCourse');
     
-    // Build query
     let query = {};
     if (type && type !== 'all') {
       query.courseType = type;
@@ -1331,13 +1257,11 @@ app.get('/api/courses', async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Get courses with pagination
     const courses = await DocumentCourse.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum);
 
-    // Get total count
     const totalCount = await DocumentCourse.countDocuments(query);
 
     console.log(`✅ Found ${courses.length} ${type || 'all'} courses`);
@@ -1367,7 +1291,6 @@ app.post('/api/courses/validate-masterclass-access', async (req, res) => {
     const { accessCode } = req.body;
     console.log('🔐 Validating masterclass access code:', accessCode);
     
-    // Simple validation - you can replace this with your actual validation logic
     const validCodes = ['MASTER2024', 'PREMIUM123', 'ACCESS789'];
     
     if (validCodes.includes(accessCode)) {
@@ -1445,21 +1368,15 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/debug-routes', (req, res) => {
   const routes = [
-    // NEW ENDPOINTS FOR CERTIFICATE ENHANCEMENT
     '/api/users/email/:email',
     '/api/users/username/:username',
     '/api/courses/general/details',
-    
-    // Course Results Routes
     '/api/course-results',
     '/api/course-results/user/:userName',
     '/api/course-results/notifications/count',
     '/api/course-results/mark-read',
-    
-    // 🚨 ADDED: Video count routes
     '/api/videos/count',
     '/api/admin/videos/count',
-    
     '/api/courses/notification-counts',
     '/api/notifications/admin-messages/:userId',
     '/api/courses/:id',
@@ -1485,7 +1402,6 @@ app.get('/api/debug-routes', (req, res) => {
     '/api/notifications/mark-read',
     '/api/direct-courses/:id/view',
     '/api/debug/quiz-by-destination',
-    // Course management routes
     '/api/admin/upload-general-questions',
     '/api/admin/upload-masterclass-questions',
     '/api/user/general-course-results',
@@ -1493,19 +1409,15 @@ app.get('/api/debug-routes', (req, res) => {
     '/api/admin/all-course-results',
     '/api/admin/course-completed-notifications',
     '/api/admin/mark-course-completed-read',
-    // Course questions routes
     '/api/general-course-questions',
     '/api/masterclass-course-questions',
-    // Community routes
     '/api/community/messages',
     '/api/community/active-call',
-    // VIDEO ROUTES - NEWLY ADDED
     '/api/videos',
     '/api/videos/validate-masterclass-access',
     '/api/admin/upload-video',
     '/api/admin/videos',
     '/api/admin/videos/:id',
-    // DEBUG ROUTES
     '/api/debug/upload-test',
     '/api/debug/courses',
     '/api/debug/courses/lookup/:id',
@@ -1524,7 +1436,6 @@ app.get('/api/debug-routes', (req, res) => {
 
 app.get('/api/direct-courses/:id/view', async (req, res) => {
   try {
-    // Check database connection first
     if (mongoose.connection.readyState !== 1) {
       return res.status(503).json({
         success: false,
@@ -1545,7 +1456,6 @@ app.get('/api/direct-courses/:id/view', async (req, res) => {
 
     console.log('✅ Course found:', course.title);
     
-    // Check if course has HTML content with images
     if (course.htmlContent && course.htmlContent.length > 100) {
       console.log('📷 Returning HTML content with embedded images');
       return res.json({
@@ -1560,14 +1470,12 @@ app.get('/api/direct-courses/:id/view', async (req, res) => {
       });
     }
 
-    // File matching logic remains the same...
     const uploadsPath = path.join(__dirname, 'uploads/courses');
     const files = fs.readdirSync(uploadsPath);
     
     let actualFilePath = null;
     let actualFileName = null;
 
-    // STRATEGY 1: Check storedFileName
     if (course.storedFileName) {
       const storedFilePath = path.join(uploadsPath, course.storedFileName);
       if (fs.existsSync(storedFilePath)) {
@@ -1576,7 +1484,6 @@ app.get('/api/direct-courses/:id/view', async (req, res) => {
       }
     }
 
-    // If no file found, return error
     if (!actualFilePath || !fs.existsSync(actualFilePath)) {
       return res.json({
         success: false,
@@ -1585,7 +1492,6 @@ app.get('/api/direct-courses/:id/view', async (req, res) => {
       });
     }
 
-    // Convert file content
     try {
       const result = await mammoth.convertToHtml({ path: actualFilePath });
       const htmlContent = result.value;
@@ -1635,7 +1541,6 @@ app.get('/api/general-course-questions', async (req, res) => {
 
     const db = mongoose.connection.db;
     
-    // Fetch all general course questions
     const questionSets = await db.collection('general_course_questions')
       .find({})
       .sort({ createdAt: -1 })
@@ -1674,7 +1579,6 @@ app.get('/api/masterclass-course-questions', async (req, res) => {
 
     const db = mongoose.connection.db;
     
-    // Fetch all masterclass course questions
     const questionSets = await db.collection('masterclass_course_questions')
       .find({})
       .sort({ createdAt: -1 })
@@ -1715,17 +1619,13 @@ app.get('/api/quiz/questions', async (req, res) => {
 
     const db = mongoose.connection.db;
     
-    // FIX: Build query to filter by course/destination
     let query = {};
     
     if (courseId && mongoose.Types.ObjectId.isValid(courseId)) {
-      // If courseId is provided, filter by courseRef
       query.courseRef = new mongoose.Types.ObjectId(courseId);
     } else if (destinationId) {
-      // If destinationId is provided, filter by destinationId
       query.destinationId = destinationId;
     } else if (destination) {
-      // If destination name is provided, filter by destination name
       query.destinationId = destination;
     } else {
       return res.status(400).json({
@@ -1753,16 +1653,14 @@ app.get('/api/quiz/questions', async (req, res) => {
       });
     }
     
-    // FIX: Include the correct answer index for frontend comparison
     const formattedQuestions = questions.map(q => {
-      // Find the index of the correct answer in the options array
       const correctIndex = q.options.findIndex(option => option === q.correctAnswer);
       
       return {
         id: q._id,
         question: q.question,
         options: q.options || [],
-        correctAnswer: correctIndex, // CRITICAL FIX: Send index instead of text
+        correctAnswer: correctIndex,
         explanation: q.explanation
       };
     });
@@ -1806,12 +1704,10 @@ app.post('/api/quiz/submit', async (req, res) => {
     const questionResults = [];
 
     for (const answer of answers) {
-      // FIX: Ensure we're checking questions from the correct course
       const questionQuery = { 
         _id: new mongoose.Types.ObjectId(answer.questionId)
       };
       
-      // Add course filtering to ensure we're scoring the right questions
       if (courseId && mongoose.Types.ObjectId.isValid(courseId)) {
         questionQuery.courseRef = new mongoose.Types.ObjectId(courseId);
       } else if (destination) {
@@ -1821,7 +1717,6 @@ app.post('/api/quiz/submit', async (req, res) => {
       const question = await db.collection('quiz_questions').findOne(questionQuery);
       
       if (question) {
-        // FIX: Compare based on option indexes, not text
         const correctIndex = question.options.findIndex(option => option === question.correctAnswer);
         const isCorrect = correctIndex === answer.selectedAnswer;
         
@@ -1831,8 +1726,8 @@ app.post('/api/quiz/submit', async (req, res) => {
           questionId: answer.questionId,
           questionText: question.question,
           selectedAnswer: answer.selectedAnswer,
-          correctAnswer: correctIndex, // Store index for frontend
-          correctAnswerText: question.correctAnswer, // Keep text for explanation
+          correctAnswer: correctIndex,
+          correctAnswerText: question.correctAnswer,
           isCorrect: isCorrect,
           options: question.options || [],
           explanation: question.explanation
@@ -1865,7 +1760,7 @@ app.post('/api/quiz/submit', async (req, res) => {
       totalQuestions: totalQuestions,
       percentage: percentage,
       resultId: quizResult._id,
-      answers: questionResults, // Return detailed results for frontend display
+      answers: questionResults,
       collection: 'quiz_results'
     });
 
@@ -1911,7 +1806,6 @@ app.post('/api/quiz/results', async (req, res) => {
     let calculatedScore = score || 0;
     const questionResults = [];
 
-    // If score is not provided, calculate it from answers
     if (score === undefined) {
       for (const answer of answers) {
         const questionQuery = { 
@@ -1945,7 +1839,6 @@ app.post('/api/quiz/results', async (req, res) => {
         }
       }
     } else {
-      // Use the provided answers directly
       questionResults.push(...answers);
     }
 
@@ -1953,7 +1846,6 @@ app.post('/api/quiz/results', async (req, res) => {
     const finalPercentage = percentage || Math.round((calculatedScore / finalTotalQuestions) * 100);
     const finalTimeTaken = timeTaken || 0;
     
-    // FIX: Determine remark if not provided
     const getRemark = (percent) => {
       if (percent >= 80) return "Excellent";
       if (percent >= 60) return "Good";
@@ -1963,7 +1855,6 @@ app.post('/api/quiz/results', async (req, res) => {
     
     const finalRemark = remark || getRemark(finalPercentage);
 
-    // FIX: Create quiz result with ALL required fields
     const quizResult = new QuizResult({
       userId: userId,
       userName: userName,
@@ -2024,7 +1915,6 @@ app.get('/api/quiz/results', async (req, res) => {
 
     const QuizResult = require('./models/QuizResult');
     
-    // CRITICAL FIX: REMOVED .select('-answers') to INCLUDE detailed answers
     const results = await QuizResult.find({ userId: userId })
       .sort({ submittedAt: -1 });
 
@@ -2054,10 +1944,9 @@ app.get('/api/quiz/results/admin', async (req, res) => {
     
     const QuizResult = require('./models/QuizResult');
     
-    // Get all quiz results with user information
     const results = await QuizResult.find()
       .sort({ submittedAt: -1 })
-      .populate('userId', 'username email'); // Populate user details if needed
+      .populate('userId', 'username email');
 
     console.log(`✅ Admin found ${results.length} quiz results total`);
 
@@ -2065,7 +1954,7 @@ app.get('/api/quiz/results/admin', async (req, res) => {
       success: true,
       results: results,
       total: results.length,
-      totalCount: results.length, // ADDED: For frontend compatibility
+      totalCount: results.length,
       collection: 'quiz_results',
       message: 'Admin quiz results retrieved successfully'
     });
@@ -2118,7 +2007,6 @@ app.get('/api/notifications/counts', async (req, res) => {
     const userIdentifier = req.query.userId || 'default';
     const userRole = req.query.userRole || 'student';
 
-    // Get course counts
     const DocumentCourse = require('./models/DocumentCourse');
     const generalCoursesCount = await DocumentCourse.countDocuments({ 
       courseType: 'general',
@@ -2176,7 +2064,6 @@ app.put('/api/notifications/mark-admin-messages-read', authMiddleware, async (re
     
     console.log(`🔒 MARKING admin messages as read for user: ${userId}`);
     
-    // Mark all unread admin messages as read
     const Message = require('./models/Message');
     const result = await Message.updateMany(
       { 
@@ -2189,7 +2076,6 @@ app.put('/api/notifications/mark-admin-messages-read', authMiddleware, async (re
       }
     );
 
-    // Reset unread message count
     const User = require('./models/User');
     await User.findByIdAndUpdate(userId, {
       unreadMessages: 0,
@@ -2218,7 +2104,6 @@ app.put('/api/quiz/results/mark-read', async (req, res) => {
     
     console.log(`🔔 Marking quiz results as read:`, resultIds);
     
-    // FIX: Make resultIds optional - if not provided, mark all as read
     if (!resultIds || !Array.isArray(resultIds) || resultIds.length === 0) {
       console.log('⚠️ No specific resultIds provided, marking all results as read');
       
@@ -2239,7 +2124,6 @@ app.put('/api/quiz/results/mark-read', async (req, res) => {
 
     const QuizResult = require('./models/QuizResult');
     
-    // Mark specific results as read
     const updateResult = await QuizResult.updateMany(
       { _id: { $in: resultIds } },
       { $set: { readByAdmin: true, readAt: new Date() } }
@@ -2375,7 +2259,6 @@ app.get('/api/admin/all-course-results', async (req, res) => {
   try {
     const db = mongoose.connection.db;
     
-    // Combine results from both collections
     const generalResults = await db.collection('general_course_results')
       .find()
       .sort({ date: -1 })
@@ -2407,7 +2290,6 @@ app.get('/api/admin/all-course-results', async (req, res) => {
 // Notification routes
 app.get('/api/admin/course-completed-notifications', async (req, res) => {
   try {
-    // This would typically count unread submissions
     const db = mongoose.connection.db;
     const count = await db.collection('general_course_results')
       .countDocuments({ readByAdmin: { $ne: true } }) +
@@ -2466,7 +2348,6 @@ app.get('/api/debug/messages-sent', async (req, res) => {
   try {
     console.log('🐛 DEBUG: Testing messages/sent route');
     
-    // Simple auth check
     const token = req.header('Authorization')?.replace('Bearer ', '');
     if (!token) {
       return res.status(401).json({ success: false, message: 'No token' });
@@ -2538,18 +2419,15 @@ app.get('/api/debug/quiz-collections', async (req, res) => {
 
     const db = mongoose.connection.db;
     
-    // List all collections
     const collections = await db.listCollections().toArray();
     const collectionNames = collections.map(col => col.name);
     
     console.log('📊 Available collections:', collectionNames);
     
-    // Check quiz_questions collection
     const quizQuestionsCount = await db.collection('quiz_questions').countDocuments();
     const quizResultsCount = await db.collection('quiz_results').countDocuments();
     const courseResultsCount = await db.collection('course_results').countDocuments();
     
-    // Sample questions
     const sampleQuestions = await db.collection('quiz_questions').find().limit(2).toArray();
     
     res.json({
@@ -2587,7 +2465,6 @@ app.get('/api/debug/quiz-by-destination', async (req, res) => {
   try {
     const db = mongoose.connection.db;
     
-    // Get all unique destinations with question counts
     const destinations = await db.collection('quiz_questions').aggregate([
       {
         $group: {
@@ -2599,7 +2476,6 @@ app.get('/api/debug/quiz-by-destination', async (req, res) => {
       { $sort: { _id: 1 } }
     ]).toArray();
     
-    // Sample questions for each destination
     const destinationSamples = {};
     
     for (const dest of destinations) {
@@ -2636,6 +2512,320 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../dist/index.html'));
   }
 });
+
+// 🔥 CRITICAL: SOCKET.IO SETUP WITH WEBRTC SUPPORT
+const initializeSocket = (server) => {
+  const io = new Server(server, {
+    cors: {
+      origin: [
+        "http://localhost:5173", 
+        "http://localhost:5174",
+        "https://the-conclave-academy.netlify.app",
+        "https://travel-tour-academy-backend.onrender.com"
+      ],
+      methods: ["GET", "POST"],
+      credentials: true
+    }
+  });
+
+  const activeCalls = new Map();
+  const userSockets = new Map();
+  const communityMessages = [];
+
+  io.on('connection', (socket) => {
+    console.log('🔌 User connected:', socket.id);
+
+    // User joins the community
+    socket.on('user_join', (userData) => {
+      userSockets.set(socket.id, {
+        socketId: socket.id,
+        userId: userData.userId,
+        userName: userData.userName,
+        role: userData.role
+      });
+      
+      console.log(`👤 ${userData.userName} (${userData.role}) joined community with socket ID: ${socket.id}`);
+      
+      // Send current active calls to the user
+      if (activeCalls.size > 0) {
+        activeCalls.forEach((call, callId) => {
+          if (call.isActive) {
+            socket.emit('call_started', {
+              callId,
+              adminName: call.adminName,
+              message: `${call.adminName} has an active community call`,
+              startTime: call.startTime,
+              withAudio: true
+            });
+          }
+        });
+      }
+      
+      // Send message history
+      if (communityMessages.length > 0) {
+        socket.emit('message_history', communityMessages.slice(-50));
+      }
+      
+      // Broadcast to all users that someone joined
+      socket.broadcast.emit('user_online', {
+        userName: userData.userName,
+        userId: userData.userId,
+        role: userData.role,
+        socketId: socket.id
+      });
+    });
+
+    // Admin starts a community call
+    socket.on('admin_start_call', (callData) => {
+      const callId = `community_call_${Date.now()}`;
+      const adminUser = userSockets.get(socket.id);
+      
+      if (!adminUser || adminUser.role !== 'admin') {
+        socket.emit('error', { message: 'Only admins can start calls' });
+        return;
+      }
+
+      const call = {
+        id: callId,
+        adminId: adminUser.userId,
+        adminName: adminUser.userName,
+        participants: new Map([[socket.id, adminUser]]),
+        startTime: new Date(),
+        isActive: true,
+        createdAt: new Date(),
+        withAudio: callData.withAudio || true
+      };
+      
+      activeCalls.set(callId, call);
+      
+      console.log(`📞 Admin ${adminUser.userName} started call: ${callId} with WebRTC audio`);
+      
+      // Add admin as first participant
+      socket.join(callId);
+      
+      // Notify ALL users about the call
+      io.emit('call_started', {
+        callId,
+        adminName: adminUser.userName,
+        message: `${adminUser.userName} has started a community call with voice chat`,
+        startTime: call.startTime,
+        persistent: true,
+        withAudio: true
+      });
+      
+      // Send current participants to admin
+      socket.emit('call_participants_update', {
+        callId,
+        participants: Array.from(call.participants.values())
+      });
+    });
+
+    // User joins a call
+    socket.on('join_call', (data) => {
+      const call = activeCalls.get(data.callId);
+      const user = userSockets.get(socket.id);
+      
+      if (!call || !call.isActive) {
+        socket.emit('error', { message: 'Call not found or ended' });
+        return;
+      }
+
+      if (!user) {
+        socket.emit('error', { message: 'User not registered' });
+        return;
+      }
+
+      // Add user to call participants
+      call.participants.set(socket.id, user);
+      socket.join(data.callId);
+      
+      console.log(`👤 ${user.userName} joined call: ${data.callId} with WebRTC audio`);
+      
+      // Notify all participants in the call about new user
+      io.to(data.callId).emit('user_joined_call', {
+        userName: user.userName,
+        userId: user.userId,
+        role: user.role,
+        socketId: socket.id,
+        participantCount: call.participants.size
+      });
+      
+      // Send updated participants list to everyone in call
+      io.to(data.callId).emit('call_participants_update', {
+        callId: data.callId,
+        participants: Array.from(call.participants.values())
+      });
+
+      // Notify existing participants to establish WebRTC with new user
+      socket.to(data.callId).emit('webrtc_new_participant', {
+        socketId: socket.id,
+        userName: user.userName
+      });
+    });
+
+    // User leaves a call
+    socket.on('leave_call', (data) => {
+      const call = activeCalls.get(data.callId);
+      const user = userSockets.get(socket.id);
+      
+      if (call && user) {
+        call.participants.delete(socket.id);
+        socket.leave(data.callId);
+        
+        console.log(`👤 ${user.userName} left call: ${data.callId}`);
+        
+        // Notify remaining participants
+        socket.to(data.callId).emit('user_left_call', {
+          userName: user.userName,
+          socketId: socket.id,
+          participantCount: call.participants.size
+        });
+        
+        // Send updated participants list
+        io.to(data.callId).emit('call_participants_update', {
+          callId: data.callId,
+          participants: Array.from(call.participants.values())
+        });
+        
+        // If no participants left, keep call active for others to join
+        if (call.participants.size === 0) {
+          console.log(`📞 Call ${data.callId} has no participants, but remains active`);
+        }
+      }
+    });
+
+    // Admin ends the call
+    socket.on('admin_end_call', (data) => {
+      const call = activeCalls.get(data.callId);
+      const adminUser = userSockets.get(socket.id);
+      
+      if (call && adminUser && adminUser.role === 'admin' && call.adminId === adminUser.userId) {
+        // Notify all participants
+        io.emit('call_ended', {
+          callId: data.callId,
+          message: 'Call has been ended by admin',
+          endedBy: adminUser.userName
+        });
+        
+        // Remove all participants from the room
+        io.socketsLeave(data.callId);
+        activeCalls.delete(data.callId);
+        
+        console.log(`📞 Call ended by admin: ${data.callId}`);
+      }
+    });
+
+    // Send message in community chat
+    socket.on('send_message', (messageData) => {
+      const user = userSockets.get(socket.id);
+      if (user) {
+        const message = {
+          id: `msg_${Date.now()}_${socket.id}`,
+          sender: user.userName,
+          senderId: user.userId,
+          text: messageData.text,
+          timestamp: new Date(),
+          isAdmin: user.role === 'admin',
+          callId: messageData.callId || null
+        };
+        
+        // Store message persistently
+        communityMessages.push(message);
+        
+        // Keep only last 1000 messages
+        if (communityMessages.length > 1000) {
+          communityMessages.splice(0, communityMessages.length - 1000);
+        }
+        
+        // Broadcast message
+        if (messageData.callId) {
+          io.to(messageData.callId).emit('new_message', message);
+        } else {
+          io.emit('new_message', message);
+        }
+        
+        console.log(`💬 ${user.userName}: ${messageData.text}`);
+      }
+    });
+
+    // 🔥 WEBRTC SIGNALING HANDLERS - CRITICAL FOR AUDIO
+    socket.on('webrtc_offer', (data) => {
+      console.log(`📤 WebRTC offer from ${socket.id} to ${data.targetSocketId}`);
+      socket.to(data.targetSocketId).emit('webrtc_offer', {
+        offer: data.offer,
+        senderSocketId: socket.id,
+        senderName: data.senderName
+      });
+    });
+
+    socket.on('webrtc_answer', (data) => {
+      console.log(`📤 WebRTC answer from ${socket.id} to ${data.targetSocketId}`);
+      socket.to(data.targetSocketId).emit('webrtc_answer', {
+        answer: data.answer,
+        senderSocketId: socket.id
+      });
+    });
+
+    socket.on('webrtc_ice_candidate', (data) => {
+      console.log(`🧊 WebRTC ICE candidate from ${socket.id} to ${data.targetSocketId}`);
+      socket.to(data.targetSocketId).emit('webrtc_ice_candidate', {
+        candidate: data.candidate,
+        senderSocketId: socket.id
+      });
+    });
+
+    // Notify about new participant for WebRTC
+    socket.on('webrtc_new_participant', (data) => {
+      socket.to(data.callId).emit('webrtc_new_participant', {
+        socketId: socket.id,
+        userName: data.userName
+      });
+    });
+
+    // Handle disconnection
+    socket.on('disconnect', () => {
+      const user = userSockets.get(socket.id);
+      if (user) {
+        console.log(`👤 ${user.userName} disconnected`);
+        
+        // Remove user from all active calls
+        activeCalls.forEach((call, callId) => {
+          if (call.participants.has(socket.id)) {
+            call.participants.delete(socket.id);
+            
+            // Notify other participants
+            socket.to(callId).emit('user_left_call', {
+              userName: user.userName,
+              socketId: socket.id,
+              participantCount: call.participants.size
+            });
+            
+            // Send updated participants list
+            io.to(callId).emit('call_participants_update', {
+              callId: callId,
+              participants: Array.from(call.participants.values())
+            });
+            
+            // If admin disconnects, keep call active but notify
+            if (call.adminId === user.userId) {
+              io.emit('call_admin_away', {
+                callId: callId,
+                message: 'Admin has left the call, but call remains active',
+                adminName: user.userName
+              });
+            }
+          }
+        });
+        
+        userSockets.delete(socket.id);
+      }
+      
+      console.log('🔌 User disconnected:', socket.id);
+    });
+  });
+
+  return io;
+};
 
 // IMPROVED MONGODB CONNECTION WITH RETRY LOGIC
 const connectWithRetry = async (retries = 5, delay = 5000) => {
@@ -2691,7 +2881,7 @@ const initializeDatabase = async () => {
     const uploadsDir = path.join(__dirname, 'uploads');
     const coursesDir = path.join(uploadsDir, 'courses');
     const imagesDir = path.join(coursesDir, 'images');
-    const videosDir = path.join(uploadsDir, 'videos'); // ADDED: Videos directory
+    const videosDir = path.join(uploadsDir, 'videos');
     
     [uploadsDir, coursesDir, imagesDir, videosDir].forEach(dir => {
       if (!fs.existsSync(dir)) {
@@ -2757,278 +2947,6 @@ app.use('*', (req, res) => {
   }
 });
 
-// Initialize Socket.io - UPDATED VERSION WITH PERSISTENT CALLS
-const initializeSocket = (server) => {
-  const io = new Server(server, {
-    cors: {
-      origin: [
-        "http://localhost:5173", 
-        "http://localhost:5174",
-        "https://the-conclave-academy.netlify.app", // Your Netlify frontend URL
-        "https://travel-tour-academy-backend.onrender.com" // Your backend URL
-      ],
-      methods: ["GET", "POST"],
-      credentials: true
-    }
-  });
-
-  const activeCalls = new Map();
-  const userSockets = new Map();
-  const communityMessages = []; // Store messages persistently
-
-  // Load existing active calls from database or keep them in memory
-  // For production, you'd want to store this in Redis or MongoDB
-
-  io.on('connection', (socket) => {
-    console.log('🔌 User connected:', socket.id);
-
-    // User joins the app
-    socket.on('user_join', (userData) => {
-      userSockets.set(socket.id, {
-        socketId: socket.id,
-        userId: userData.userId,
-        userName: userData.userName,
-        role: userData.role
-      });
-      
-      console.log(`👤 ${userData.userName} (${userData.role}) joined`);
-      
-      // Send current active calls to the user
-      if (activeCalls.size > 0) {
-        activeCalls.forEach((call, callId) => {
-          if (call.isActive) {
-            socket.emit('call_started', {
-              callId,
-              adminName: call.adminName,
-              message: `${call.adminName} has an active community call`,
-              startTime: call.startTime
-            });
-          }
-        });
-      }
-      
-      // Send message history
-      if (communityMessages.length > 0) {
-        socket.emit('message_history', communityMessages.slice(-50)); // Last 50 messages
-      }
-      
-      // Broadcast to all users that someone joined
-      socket.broadcast.emit('user_online', {
-        userName: userData.userName,
-        userId: userData.userId,
-        role: userData.role
-      });
-    });
-
-    // Admin starts a community call
-    socket.on('admin_start_call', (callData) => {
-      const callId = `community_call_${Date.now()}`;
-      const adminUser = userSockets.get(socket.id);
-      
-      if (!adminUser || adminUser.role !== 'admin') {
-        socket.emit('error', { message: 'Only admins can start calls' });
-        return;
-      }
-
-      const call = {
-        id: callId,
-        adminId: adminUser.userId,
-        adminName: adminUser.userName,
-        participants: new Map([[socket.id, adminUser]]),
-        startTime: new Date(),
-        isActive: true,
-        createdAt: new Date()
-      };
-      
-      activeCalls.set(callId, call);
-      
-      console.log(`📞 Admin ${adminUser.userName} started call: ${callId}`);
-      
-      // Add admin as first participant
-      socket.join(callId);
-      
-      // Notify ALL users about the call - this persists until admin ends it
-      io.emit('call_started', {
-        callId,
-        adminName: adminUser.userName,
-        message: `${adminUser.userName} has started a community call`,
-        startTime: call.startTime,
-        persistent: true
-      });
-      
-      // Send current participants to admin
-      socket.emit('call_participants_update', {
-        callId,
-        participants: Array.from(call.participants.values())
-      });
-    });
-
-    // User joins a call
-    socket.on('join_call', (data) => {
-      const call = activeCalls.get(data.callId);
-      const user = userSockets.get(socket.id);
-      
-      if (!call || !call.isActive) {
-        socket.emit('error', { message: 'Call not found or ended' });
-        return;
-      }
-
-      if (!user) {
-        socket.emit('error', { message: 'User not registered' });
-        return;
-      }
-
-      // Add user to call participants
-      call.participants.set(socket.id, user);
-      socket.join(data.callId);
-      
-      console.log(`👤 ${user.userName} joined call: ${data.callId}`);
-      
-      // Notify all participants in the call about new user
-      io.to(data.callId).emit('user_joined_call', {
-        userName: user.userName,
-        userId: user.userId,
-        role: user.role,
-        participantCount: call.participants.size
-      });
-      
-      // Send updated participants list to everyone in call
-      io.to(data.callId).emit('call_participants_update', {
-        callId: data.callId,
-        participants: Array.from(call.participants.values())
-      });
-    });
-
-    // User leaves a call
-    socket.on('leave_call', (data) => {
-      const call = activeCalls.get(data.callId);
-      const user = userSockets.get(socket.id);
-      
-      if (call && user) {
-        call.participants.delete(socket.id);
-        socket.leave(data.callId);
-        
-        console.log(`👤 ${user.userName} left call: ${data.callId}`);
-        
-        // Notify remaining participants
-        socket.to(data.callId).emit('user_left_call', {
-          userName: user.userName,
-          participantCount: call.participants.size
-        });
-        
-        // Send updated participants list
-        io.to(data.callId).emit('call_participants_update', {
-          callId: data.callId,
-          participants: Array.from(call.participants.values())
-        });
-        
-        // If no participants left, DON'T end the call - keep it active for others to join
-        if (call.participants.size === 0) {
-          console.log(`📞 Call ${data.callId} has no participants, but remains active`);
-        }
-      }
-    });
-
-    // Admin ends the call
-    socket.on('admin_end_call', (data) => {
-      const call = activeCalls.get(data.callId);
-      const adminUser = userSockets.get(socket.id);
-      
-      if (call && adminUser && adminUser.role === 'admin' && call.adminId === adminUser.userId) {
-        // Notify all participants
-        io.emit('call_ended', {
-          callId: data.callId,
-          message: 'Call has been ended by admin',
-          endedBy: adminUser.userName
-        });
-        
-        // Remove all participants from the room
-        io.socketsLeave(data.callId);
-        activeCalls.delete(data.callId);
-        
-        console.log(`📞 Call ended by admin: ${data.callId}`);
-      }
-    });
-
-    // Send message in community chat
-    socket.on('send_message', (messageData) => {
-      const user = userSockets.get(socket.id);
-      if (user) {
-        const message = {
-          id: `msg_${Date.now()}_${socket.id}`,
-          sender: user.userName,
-          senderId: user.userId,
-          text: messageData.text,
-          timestamp: new Date(),
-          isAdmin: user.role === 'admin',
-          callId: messageData.callId || null
-        };
-        
-        // Store message persistently
-        communityMessages.push(message);
-        
-        // Keep only last 1000 messages to prevent memory issues
-        if (communityMessages.length > 1000) {
-          communityMessages.splice(0, communityMessages.length - 1000);
-        }
-        
-        // Broadcast message to all users
-        if (messageData.callId) {
-          // If it's a call message, send only to call participants
-          io.to(messageData.callId).emit('new_message', message);
-        } else {
-          // If it's a general community message, send to everyone
-          io.emit('new_message', message);
-        }
-        
-        console.log(`💬 ${user.userName}: ${messageData.text}`);
-      }
-    });
-
-    // Handle disconnection
-    socket.on('disconnect', () => {
-      const user = userSockets.get(socket.id);
-      if (user) {
-        console.log(`👤 ${user.userName} disconnected`);
-        
-        // Remove user from all active calls
-        activeCalls.forEach((call, callId) => {
-          if (call.participants.has(socket.id)) {
-            call.participants.delete(socket.id);
-            
-            // Notify other participants
-            socket.to(callId).emit('user_left_call', {
-              userName: user.userName,
-              participantCount: call.participants.size
-            });
-            
-            // Send updated participants list
-            io.to(callId).emit('call_participants_update', {
-              callId: callId,
-              participants: Array.from(call.participants.values())
-            });
-            
-            // If admin disconnects, keep the call active but notify
-            if (call.adminId === user.userId) {
-              io.emit('call_admin_away', {
-                callId: callId,
-                message: 'Admin has left the call, but call remains active',
-                adminName: user.userName
-              });
-            }
-          }
-        });
-        
-        userSockets.delete(socket.id);
-      }
-      
-      console.log('🔌 User disconnected:', socket.id);
-    });
-  });
-
-  return io;
-};
-
 // START SERVER WITH DATABASE CONNECTION
 const startServer = async () => {
   const PORT = process.env.PORT || 5000;
@@ -3086,6 +3004,10 @@ const startServer = async () => {
       console.log(`\n👥 Community routes:`);
       console.log(`📍   Community messages: http://localhost:${PORT}/api/community/messages`);
       console.log(`📍   Active call: http://localhost:${PORT}/api/community/active-call`);
+      console.log(`\n🔊 WEBRTC AUDIO SUPPORT:`);
+      console.log(`📍   Real-time voice chat enabled`);
+      console.log(`📍   WebRTC signaling implemented`);
+      console.log(`📍   Peer-to-peer audio connections`);
       console.log(`\n🐛 Debug routes:`);
       console.log(`📍   Quiz collections debug: http://localhost:${PORT}/api/debug/quiz-collections`);
       console.log(`📍   Quiz by destination debug: http://localhost:${PORT}/api/debug/quiz-by-destination`);
@@ -3104,6 +3026,7 @@ const startServer = async () => {
       console.log('📝 Course descriptions: Fetched from general_course_questions collection');
       console.log('🎥 Video system: Cloudinary integration for video storage and streaming');
       console.log('📊 Video counts: New endpoints for accurate badge notifications');
+      console.log('🔊 WebRTC Audio: Real-time voice chat with peer-to-peer connections');
       console.log('👥 Community features: Real-time messaging and voice calls enabled');
       console.log('🌐 CORS configured for production: the-conclave-academy.netlify.app and travel-tour-academy-backend.onrender.com');
       console.log('📦 Frontend static files served from: ../dist directory');
@@ -3113,6 +3036,13 @@ const startServer = async () => {
       console.log('✅ Progress tracking for large files');
       console.log('✅ Fallback to local storage if Cloudinary fails');
       console.log('✅ Automatic cleanup of temporary files');
+      console.log('\n🔊 WEBRTC AUDIO FEATURES:');
+      console.log('✅ Real-time voice communication');
+      console.log('✅ Peer-to-peer audio streaming');
+      console.log('✅ Microphone permissions handling');
+      console.log('✅ Audio visualization');
+      console.log('✅ Mute/unmute functionality');
+      console.log('✅ Connection status monitoring');
     });
 
     // Attempt database connection in background
@@ -3125,9 +3055,9 @@ const startServer = async () => {
       console.log('💡 Server will continue running with basic functionality');
     }
 
-    // Initialize Socket.io for real-time communication
+    // Initialize Socket.io for real-time communication with WebRTC
     const io = initializeSocket(server);
-    console.log('🔌 Socket.io initialized for real-time communication');
+    console.log('🔌 Socket.io initialized for real-time communication with WebRTC support');
 
     // Handle graceful shutdown
     process.on('SIGINT', async () => {
