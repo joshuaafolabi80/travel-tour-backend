@@ -1,4 +1,4 @@
-// server/models/CommunityMessage.js
+// travel-tour-backend/models/CommunityMessage.js
 const mongoose = require('mongoose');
 
 const communityMessageSchema = new mongoose.Schema({

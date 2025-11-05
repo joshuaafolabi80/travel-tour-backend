@@ -1,4 +1,4 @@
-// server/routes/communityRoutes.js
+// travel-tour-backend/routes/communityRoutes.js
 const express = require('express');
 const router = express.Router();
 const communityController = require('../controllers/communityController');

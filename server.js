@@ -1,4 +1,4 @@
-// server.js - COMPLETE INTEGRATED VERSION WITH WEBRTC AUDIO SUPPORT
+//travel-tour-backend/server.js - COMPLETE INTEGRATED VERSION WITH WEBRTC AUDIO SUPPORT
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -59,6 +59,10 @@ app.use('/api/messages', messageRoutes);
 // ADDED: Community Routes
 const communityRoutes = require('./routes/communityRoutes');
 app.use('/api/community', communityRoutes);
+
+// ADDED: Agora Token Routes
+const agoraTokenRoutes = require('./routes/agoraToken');
+app.use('/api/agora', agoraTokenRoutes);
 
 // 🚨 CRITICAL FIX: Configure multer for LARGE file uploads
 const storage = multer.diskStorage({
@@ -2774,14 +2778,6 @@ const initializeSocket = (server) => {
       });
     });
 
-    // Notify about new participant for WebRTC
-    socket.on('webrtc_new_participant', (data) => {
-      socket.to(data.callId).emit('webrtc_new_participant', {
-        socketId: socket.id,
-        userName: data.userName
-      });
-    });
-
     // Handle disconnection
     socket.on('disconnect', () => {
       const user = userSockets.get(socket.id);
@@ -3004,6 +3000,8 @@ const startServer = async () => {
       console.log(`\n👥 Community routes:`);
       console.log(`📍   Community messages: http://localhost:${PORT}/api/community/messages`);
       console.log(`📍   Active call: http://localhost:${PORT}/api/community/active-call`);
+      console.log(`\n🔊 AGORA TOKEN ROUTES - NEWLY ADDED:`);
+      console.log(`📍   Generate Agora token: http://localhost:${PORT}/api/agora/token`);
       console.log(`\n🔊 WEBRTC AUDIO SUPPORT:`);
       console.log(`📍   Real-time voice chat enabled`);
       console.log(`📍   WebRTC signaling implemented`);
@@ -3027,6 +3025,7 @@ const startServer = async () => {
       console.log('🎥 Video system: Cloudinary integration for video storage and streaming');
       console.log('📊 Video counts: New endpoints for accurate badge notifications');
       console.log('🔊 WebRTC Audio: Real-time voice chat with peer-to-peer connections');
+      console.log('🔊 Agora Integration: Token generation for enhanced voice services');
       console.log('👥 Community features: Real-time messaging and voice calls enabled');
       console.log('🌐 CORS configured for production: the-conclave-academy.netlify.app and travel-tour-academy-backend.onrender.com');
       console.log('📦 Frontend static files served from: ../dist directory');
@@ -3043,6 +3042,11 @@ const startServer = async () => {
       console.log('✅ Audio visualization');
       console.log('✅ Mute/unmute functionality');
       console.log('✅ Connection status monitoring');
+      console.log('\n🔊 AGORA INTEGRATION:');
+      console.log('✅ Token generation for secure voice calls');
+      console.log('✅ Channel-based authentication');
+      console.log('✅ User role management (publisher/subscriber)');
+      console.log('✅ Token expiration handling');
     });
 
     // Attempt database connection in background

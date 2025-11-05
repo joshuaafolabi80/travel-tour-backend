@@ -1,4 +1,4 @@
-// server/controllers/communityController.js
+// travel-tour-backend/controllers/communityController.js
 const CommunityMessage = require('../models/CommunityMessage');
 
 const communityController = {
