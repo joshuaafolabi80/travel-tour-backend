@@ -1,9 +1,10 @@
+// travel-tour-backend/routes/agoraToken.js
 const express = require('express');
 const { RtcTokenBuilder, RtcRole } = require('agora-access-token');
 const router = express.Router();
 const { authMiddleware } = require('./auth');
 
-// Generate Agora token
+// Generate Agora token - FIXED: Proper user name handling
 router.post('/generate-token', authMiddleware, (req, res) => {
   try {
     const { channelName, uid, userName } = req.body;
@@ -32,13 +33,16 @@ router.post('/generate-token', authMiddleware, (req, res) => {
       privilegeExpiredTs
     );
 
+    // FIXED: Proper user name handling to show actual names instead of IDs
+    const displayName = userName || req.user.name || req.user.username || `User ${uid}`;
+
     res.json({
       success: true,
       token: token,
       appId: appId,
       channel: channelName,
       uid: uid,
-      userName: userName || `User ${uid}`
+      userName: displayName // Send proper display name
     });
 
   } catch (error) {
