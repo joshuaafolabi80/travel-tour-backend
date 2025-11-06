@@ -2624,7 +2624,7 @@ const initializeSocket = (server) => {
       });
     });
 
-    // User joins a call
+    // User joins a call - UPDATED: Include user data
     socket.on('join_call', (data) => {
       const call = activeCalls.get(data.callId);
       const user = userSockets.get(socket.id);
@@ -2639,16 +2639,22 @@ const initializeSocket = (server) => {
         return;
       }
 
-      // Add user to call participants
-      call.participants.set(socket.id, user);
+      // Add user to call participants with the provided user data
+      call.participants.set(socket.id, {
+        ...user,
+        userId: data.userId || user.userId,
+        userName: data.userName || user.userName,
+        isAdmin: data.isAdmin || user.role === 'admin'
+      });
+      
       socket.join(data.callId);
       
-      console.log(`👤 ${user.userName} joined call: ${data.callId} with WebRTC audio`);
+      console.log(`👤 ${data.userName || user.userName} joined call: ${data.callId}`);
       
-      // Notify all participants in the call about new user
+      // Notify all participants in the call about new user WITH USER DATA
       io.to(data.callId).emit('user_joined_call', {
-        userName: user.userName,
-        userId: user.userId,
+        userId: data.userId || user.userId,
+        userName: data.userName || user.userName,
         role: user.role,
         socketId: socket.id,
         participantCount: call.participants.size
@@ -2719,17 +2725,17 @@ const initializeSocket = (server) => {
       }
     });
 
-    // Send message in community chat
+    // Send message in community chat - UPDATED: Proper message formatting
     socket.on('send_message', (messageData) => {
       const user = userSockets.get(socket.id);
       if (user) {
         const message = {
           id: `msg_${Date.now()}_${socket.id}`,
-          sender: user.userName,
+          sender: messageData.sender || user.userName,
           senderId: user.userId,
           text: messageData.text,
-          timestamp: new Date(),
-          isAdmin: user.role === 'admin',
+          timestamp: new Date(messageData.timestamp || new Date()),
+          isAdmin: messageData.isAdmin || user.role === 'admin',
           callId: messageData.callId || null
         };
         
@@ -2741,14 +2747,14 @@ const initializeSocket = (server) => {
           communityMessages.splice(0, communityMessages.length - 1000);
         }
         
-        // Broadcast message
+        // Broadcast message WITH PROPER FORMATTING
         if (messageData.callId) {
           io.to(messageData.callId).emit('new_message', message);
         } else {
           io.emit('new_message', message);
         }
         
-        console.log(`💬 ${user.userName}: ${messageData.text}`);
+        console.log(`💬 ${message.sender}: ${messageData.text}`);
       }
     });
 

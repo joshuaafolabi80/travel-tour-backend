@@ -4,7 +4,7 @@ const { RtcTokenBuilder, RtcRole } = require('agora-access-token');
 const router = express.Router();
 const { authMiddleware } = require('./auth');
 
-// Generate Agora token - FIXED: Proper user name handling
+// Generate Agora token - UPDATED: Consistent user IDs and proper user name handling
 router.post('/generate-token', authMiddleware, (req, res) => {
   try {
     const { channelName, uid, userName } = req.body;
@@ -18,31 +18,34 @@ router.post('/generate-token', authMiddleware, (req, res) => {
       });
     }
 
+    // Use a consistent UID - FIXED: Use user ID from auth token if available
+    const consistentUid = req.user?.id || uid || Date.now().toString();
+    
     // Token expiration time (1 hour)
     const expirationTimeInSeconds = 3600;
     const currentTimestamp = Math.floor(Date.now() / 1000);
     const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
 
-    // Build token with uid
+    // Build token with consistent UID
     const token = RtcTokenBuilder.buildTokenWithUid(
       appId,
       appCertificate,
       channelName,
-      uid,
+      consistentUid,
       RtcRole.PUBLISHER,
       privilegeExpiredTs
     );
 
-    // FIXED: Proper user name handling to show actual names instead of IDs
-    const displayName = userName || req.user.name || req.user.username || `User ${uid}`;
+    // FIXED: Use proper display name from request or user data
+    const displayName = userName || req.user?.name || req.user?.username || `User ${consistentUid}`;
 
     res.json({
       success: true,
       token: token,
       appId: appId,
       channel: channelName,
-      uid: uid,
-      userName: displayName // Send proper display name
+      uid: consistentUid, // Return consistent UID
+      userName: displayName
     });
 
   } catch (error) {
