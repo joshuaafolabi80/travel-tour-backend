@@ -6,7 +6,7 @@ const { authMiddleware } = require('./auth');
 // Generate Agora token
 router.post('/generate-token', authMiddleware, (req, res) => {
   try {
-    const { channelName, uid } = req.body;
+    const { channelName, uid, userName } = req.body;
     const appId = process.env.AGORA_APP_ID;
     const appCertificate = process.env.AGORA_APP_CERTIFICATE;
     
@@ -37,7 +37,8 @@ router.post('/generate-token', authMiddleware, (req, res) => {
       token: token,
       appId: appId,
       channel: channelName,
-      uid: uid
+      uid: uid,
+      userName: userName || `User ${uid}`
     });
 
   } catch (error) {
