@@ -2517,7 +2517,7 @@ app.get('*', (req, res) => {
   }
 });
 
-// 🔥 CRITICAL: SOCKET.IO SETUP WITH WEBRTC SUPPORT
+// 🔥 CRITICAL: SOCKET.IO SETUP WITH WEBRTC SUPPORT - FIXED CHAT MESSAGES
 const initializeSocket = (server) => {
   const io = new Server(server, {
     cors: {
@@ -2725,19 +2725,25 @@ const initializeSocket = (server) => {
       }
     });
 
-    // Send message in community chat - UPDATED: Proper message formatting
+    // 🔥 FIXED: Send message in community chat - PROPER MESSAGE FORMATTING
     socket.on('send_message', (messageData) => {
       const user = userSockets.get(socket.id);
-      if (user) {
+      if (user && messageData.text && messageData.text.trim()) {
         const message = {
-          id: `msg_${Date.now()}_${socket.id}`,
+          id: `msg_${Date.now()}_${socket.id}_${Math.random().toString(36).substr(2, 9)}`,
           sender: messageData.sender || user.userName,
           senderId: user.userId,
-          text: messageData.text,
+          text: messageData.text.trim(),
           timestamp: new Date(messageData.timestamp || new Date()),
           isAdmin: messageData.isAdmin || user.role === 'admin',
-          callId: messageData.callId || null
+          callId: messageData.callId || null,
+          // 🆕 ADDED: Ensure consistent user identification
+          userId: user.userId,
+          userName: user.userName,
+          userRole: user.role
         };
+        
+        console.log(`💬 SENDING MESSAGE: ${message.sender} (${message.userId}): ${message.text}`);
         
         // Store message persistently
         communityMessages.push(message);
@@ -2747,14 +2753,16 @@ const initializeSocket = (server) => {
           communityMessages.splice(0, communityMessages.length - 1000);
         }
         
-        // Broadcast message WITH PROPER FORMATTING
-        if (messageData.callId) {
+        // 🆕 FIXED: Broadcast message WITH PROPER FORMATTING AND TO CORRECT AUDIENCE
+        if (messageData.callId && messageData.callId !== 'undefined') {
+          console.log(`📢 Broadcasting to call: ${messageData.callId}`);
           io.to(messageData.callId).emit('new_message', message);
         } else {
+          console.log(`📢 Broadcasting to all users`);
           io.emit('new_message', message);
         }
-        
-        console.log(`💬 ${message.sender}: ${messageData.text}`);
+      } else {
+        console.error('❌ Invalid message data:', { user, messageData });
       }
     });
 
@@ -3053,6 +3061,12 @@ const startServer = async () => {
       console.log('✅ Channel-based authentication');
       console.log('✅ User role management (publisher/subscriber)');
       console.log('✅ Token expiration handling');
+      console.log('\n💬 CHAT SYSTEM FIXED:');
+      console.log('✅ Proper sender name display for all messages');
+      console.log('✅ Admin badge showing for admin messages');
+      console.log('✅ System messages for user join/leave events');
+      console.log('✅ Real-time message broadcasting');
+      console.log('✅ Message persistence and history');
     });
 
     // Attempt database connection in background
