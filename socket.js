@@ -89,6 +89,7 @@ const initializeSocket = (server) => {
       
       // Add admin as first participant
       socket.join(callId);
+      console.log(`✅ ADMIN JOINED ROOM: ${adminUser.userName} joined room ${callId}`);
       
       // Notify ALL users about the call
       io.emit('call_started', {
@@ -107,35 +108,58 @@ const initializeSocket = (server) => {
       });
     });
 
-    // User joins a call - FIXED: Proper room joining with validation
+    // User joins a call - COMPLETELY REWRITTEN
     socket.on('join_call', (data) => {
+      console.log(`🎯 SERVER: Received JOIN_CALL request:`, {
+        callId: data.callId,
+        userId: data.userId,
+        userName: data.userName,
+        socketId: socket.id
+      });
+
       const call = activeCalls.get(data.callId);
       const user = userSockets.get(socket.id);
       
       if (!call || !call.isActive) {
+        console.error(`❌ SERVER: Call not found or ended: ${data.callId}`);
         socket.emit('error', { message: 'Call not found or ended' });
         return;
       }
 
       if (!user) {
+        console.error(`❌ SERVER: User not registered for socket: ${socket.id}`);
         socket.emit('error', { message: 'User not registered' });
         return;
       }
 
+      // Update user data with the provided information
+      const userWithCallData = {
+        ...user,
+        userId: data.userId || user.userId,
+        userName: data.userName || user.userName,
+        isAdmin: data.isAdmin || user.role === 'admin'
+      };
+      
+      userSockets.set(socket.id, userWithCallData);
+
       // Add user to call participants
-      call.participants.set(socket.id, user);
+      call.participants.set(socket.id, userWithCallData);
       
-      // CRITICAL FIX: Join the Socket.IO room
+      // CRITICAL FIX: Join the Socket.IO room with validation
       socket.join(data.callId);
-      console.log(`✅ ${user.userName} joined Socket.IO room: ${data.callId}`);
+      console.log(`✅ SERVER: USER JOINED ROOM: ${userWithCallData.userName} (${userWithCallData.userId}) joined room ${data.callId}`);
+      console.log(`✅ SERVER: Room ${data.callId} now has ${call.participants.size} participants`);
       
-      console.log(`👤 ${user.userName} joined call: ${data.callId} with WebRTC audio`);
+      // Log all current participants in the room
+      const room = io.sockets.adapter.rooms.get(data.callId);
+      console.log(`📊 SERVER: Current sockets in room ${data.callId}:`, room ? Array.from(room) : 'None');
       
       // Notify all participants in the call about new user
+      console.log(`📢 SERVER: Broadcasting user_joined_call to room ${data.callId}`);
       io.to(data.callId).emit('user_joined_call', {
-        userName: user.userName,
-        userId: user.userId,
-        role: user.role,
+        userName: userWithCallData.userName,
+        userId: userWithCallData.userId,
+        role: userWithCallData.role,
         socketId: socket.id,
         participantCount: call.participants.size
       });
@@ -149,12 +173,17 @@ const initializeSocket = (server) => {
       // Notify existing participants to establish WebRTC with new user
       socket.to(data.callId).emit('webrtc_new_participant', {
         socketId: socket.id,
-        userName: user.userName
+        userName: userWithCallData.userName
       });
     });
 
     // User leaves a call
     socket.on('leave_call', (data) => {
+      console.log(`🚪 SERVER: Received LEAVE_CALL:`, {
+        callId: data.callId,
+        socketId: socket.id
+      });
+
       const call = activeCalls.get(data.callId);
       const user = userSockets.get(socket.id);
       
@@ -162,7 +191,7 @@ const initializeSocket = (server) => {
         call.participants.delete(socket.id);
         socket.leave(data.callId);
         
-        console.log(`👤 ${user.userName} left call: ${data.callId}`);
+        console.log(`👤 SERVER: ${user.userName} left call: ${data.callId}`);
         
         // Notify remaining participants
         socket.to(data.callId).emit('user_left_call', {
@@ -179,13 +208,15 @@ const initializeSocket = (server) => {
         
         // If no participants left, keep call active for others to join
         if (call.participants.size === 0) {
-          console.log(`📞 Call ${data.callId} has no participants, but remains active`);
+          console.log(`📞 SERVER: Call ${data.callId} has no participants, but remains active`);
         }
       }
     });
 
     // Admin ends the call
     socket.on('admin_end_call', (data) => {
+      console.log(`🛑 SERVER: Received ADMIN_END_CALL: ${data.callId}`);
+      
       const call = activeCalls.get(data.callId);
       const adminUser = userSockets.get(socket.id);
       
@@ -201,16 +232,17 @@ const initializeSocket = (server) => {
         io.socketsLeave(data.callId);
         activeCalls.delete(data.callId);
         
-        console.log(`📞 Call ended by admin: ${data.callId}`);
+        console.log(`📞 SERVER: Call ended by admin: ${data.callId}`);
       }
     });
 
     // Send message in community chat - COMPLETELY REWRITTEN
     socket.on('send_message', (messageData) => {
-      console.log('💬 SERVER: Received message:', {
+      console.log('💬 SERVER: Received SEND_MESSAGE:', {
         callId: messageData.callId,
         sender: messageData.sender,
         text: messageData.text,
+        isAdmin: messageData.isAdmin,
         socketId: socket.id
       });
 
@@ -225,15 +257,23 @@ const initializeSocket = (server) => {
         return;
       }
 
-      // Create the message object
+      if (!messageData.callId) {
+        console.error('❌ SERVER: No callId provided in message');
+        return;
+      }
+
+      // Create the message object with ALL required fields
       const message = {
-        id: `msg_${Date.now()}_${socket.id}`,
+        id: `msg_${Date.now()}_${socket.id}_${Math.random().toString(36).substr(2, 9)}`,
         sender: messageData.sender || user.userName,
         senderId: user.userId,
         text: messageData.text.trim(),
-        timestamp: new Date(),
+        timestamp: new Date(messageData.timestamp || new Date()),
         isAdmin: messageData.isAdmin || user.role === 'admin',
-        callId: messageData.callId || null
+        callId: messageData.callId,
+        userId: user.userId,
+        userName: user.userName,
+        userRole: user.role
       };
 
       // Store message persistently
@@ -244,17 +284,26 @@ const initializeSocket = (server) => {
         communityMessages.splice(0, communityMessages.length - 1000);
       }
 
-      // CRITICAL FIX: Broadcast to ALL participants in the call room
-      if (messageData.callId) {
-        console.log(`📢 SERVER: Broadcasting message to room: ${messageData.callId}`);
-        console.log(`📢 SERVER: Room participants would receive: ${user.userName}: ${message.text}`);
+      // CRITICAL FIX: Validate room exists and broadcast to ALL participants
+      const room = io.sockets.adapter.rooms.get(messageData.callId);
+      console.log(`📊 SERVER: Room ${messageData.callId} has ${room ? room.size : 0} participants`);
+      
+      if (room && room.size > 0) {
+        console.log(`📢 SERVER: Broadcasting message to room ${messageData.callId}:`);
+        console.log(`   From: ${user.userName} (${user.userId})`);
+        console.log(`   Text: ${message.text}`);
+        console.log(`   Participants in room: ${Array.from(room).join(', ')}`);
         
         // Broadcast to everyone in the call room INCLUDING the sender
         io.to(messageData.callId).emit('new_message', message);
         
         console.log(`✅ SERVER: Message broadcast completed for room: ${messageData.callId}`);
       } else {
-        console.log(`📢 SERVER: Broadcasting message to all users (no callId)`);
+        console.error(`❌ SERVER: Room ${messageData.callId} does not exist or has no participants!`);
+        console.log(`❌ SERVER: Available rooms:`, Array.from(io.sockets.adapter.rooms.keys()));
+        
+        // Fallback: Try to broadcast to all connected users
+        console.log(`🔄 SERVER: Falling back to global broadcast`);
         io.emit('new_message', message);
       }
 
@@ -291,7 +340,7 @@ const initializeSocket = (server) => {
     socket.on('disconnect', () => {
       const user = userSockets.get(socket.id);
       if (user) {
-        console.log(`👤 ${user.userName} disconnected`);
+        console.log(`👤 SERVER: ${user.userName} disconnected`);
         
         // Remove user from all active calls
         activeCalls.forEach((call, callId) => {
@@ -326,7 +375,7 @@ const initializeSocket = (server) => {
         userSockets.delete(socket.id);
       }
       
-      console.log('🔌 User disconnected:', socket.id);
+      console.log('🔌 SERVER: User disconnected:', socket.id);
     });
   });
 
