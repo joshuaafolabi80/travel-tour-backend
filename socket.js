@@ -107,7 +107,7 @@ const initializeSocket = (server) => {
       });
     });
 
-    // User joins a call
+    // User joins a call - FIXED: Proper room joining with validation
     socket.on('join_call', (data) => {
       const call = activeCalls.get(data.callId);
       const user = userSockets.get(socket.id);
@@ -124,7 +124,10 @@ const initializeSocket = (server) => {
 
       // Add user to call participants
       call.participants.set(socket.id, user);
+      
+      // CRITICAL FIX: Join the Socket.IO room
       socket.join(data.callId);
+      console.log(`✅ ${user.userName} joined Socket.IO room: ${data.callId}`);
       
       console.log(`👤 ${user.userName} joined call: ${data.callId} with WebRTC audio`);
       
@@ -202,39 +205,60 @@ const initializeSocket = (server) => {
       }
     });
 
-    // Send message in community chat - FIXED VERSION
+    // Send message in community chat - COMPLETELY REWRITTEN
     socket.on('send_message', (messageData) => {
+      console.log('💬 SERVER: Received message:', {
+        callId: messageData.callId,
+        sender: messageData.sender,
+        text: messageData.text,
+        socketId: socket.id
+      });
+
       const user = userSockets.get(socket.id);
-      if (user) {
-        const message = {
-          id: `msg_${Date.now()}_${socket.id}`,
-          sender: user.userName,
-          senderId: user.userId,
-          text: messageData.text,
-          timestamp: new Date(),
-          isAdmin: user.role === 'admin',
-          callId: messageData.callId || null
-        };
-        
-        // Store message persistently
-        communityMessages.push(message);
-        
-        // Keep only last 1000 messages
-        if (communityMessages.length > 1000) {
-          communityMessages.splice(0, communityMessages.length - 1000);
-        }
-        
-        // FIXED: Broadcast message to ALL participants in the call
-        if (messageData.callId) {
-          console.log(`💬 BROADCASTING MESSAGE in call ${messageData.callId}: ${user.userName}: ${messageData.text}`);
-          io.to(messageData.callId).emit('new_message', message);
-        } else {
-          console.log(`💬 BROADCASTING MESSAGE to all: ${user.userName}: ${messageData.text}`);
-          io.emit('new_message', message);
-        }
-        
-        console.log(`💬 ${user.userName}: ${messageData.text}`);
+      if (!user) {
+        console.error('❌ SERVER: User not found for socket:', socket.id);
+        return;
       }
+
+      if (!messageData.text || !messageData.text.trim()) {
+        console.error('❌ SERVER: Empty message text');
+        return;
+      }
+
+      // Create the message object
+      const message = {
+        id: `msg_${Date.now()}_${socket.id}`,
+        sender: messageData.sender || user.userName,
+        senderId: user.userId,
+        text: messageData.text.trim(),
+        timestamp: new Date(),
+        isAdmin: messageData.isAdmin || user.role === 'admin',
+        callId: messageData.callId || null
+      };
+
+      // Store message persistently
+      communityMessages.push(message);
+      
+      // Keep only last 1000 messages
+      if (communityMessages.length > 1000) {
+        communityMessages.splice(0, communityMessages.length - 1000);
+      }
+
+      // CRITICAL FIX: Broadcast to ALL participants in the call room
+      if (messageData.callId) {
+        console.log(`📢 SERVER: Broadcasting message to room: ${messageData.callId}`);
+        console.log(`📢 SERVER: Room participants would receive: ${user.userName}: ${message.text}`);
+        
+        // Broadcast to everyone in the call room INCLUDING the sender
+        io.to(messageData.callId).emit('new_message', message);
+        
+        console.log(`✅ SERVER: Message broadcast completed for room: ${messageData.callId}`);
+      } else {
+        console.log(`📢 SERVER: Broadcasting message to all users (no callId)`);
+        io.emit('new_message', message);
+      }
+
+      console.log(`💬 SERVER: ${user.userName} sent: ${message.text}`);
     });
 
     // WebRTC signaling handlers
@@ -263,14 +287,6 @@ const initializeSocket = (server) => {
       });
     });
 
-    // Notify about new participant for WebRTC
-    socket.on('webrtc_new_participant', (data) => {
-      socket.to(data.callId).emit('webrtc_new_participant', {
-        socketId: socket.id,
-        userName: data.userName
-      });
-    });
-
     // Handle disconnection
     socket.on('disconnect', () => {
       const user = userSockets.get(socket.id);
@@ -281,6 +297,7 @@ const initializeSocket = (server) => {
         activeCalls.forEach((call, callId) => {
           if (call.participants.has(socket.id)) {
             call.participants.delete(socket.id);
+            socket.leave(callId);
             
             // Notify other participants
             socket.to(callId).emit('user_left_call', {
