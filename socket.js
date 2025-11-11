@@ -1,4 +1,3 @@
-// travel-tour-backend/socket.js
 const { Server } = require('socket.io');
 
 let io;
@@ -203,7 +202,7 @@ const initializeSocket = (server) => {
       }
     });
 
-    // Send message in community chat
+    // Send message in community chat - FIXED VERSION
     socket.on('send_message', (messageData) => {
       const user = userSockets.get(socket.id);
       if (user) {
@@ -225,10 +224,12 @@ const initializeSocket = (server) => {
           communityMessages.splice(0, communityMessages.length - 1000);
         }
         
-        // Broadcast message
+        // FIXED: Broadcast message to ALL participants in the call
         if (messageData.callId) {
+          console.log(`💬 BROADCASTING MESSAGE in call ${messageData.callId}: ${user.userName}: ${messageData.text}`);
           io.to(messageData.callId).emit('new_message', message);
         } else {
+          console.log(`💬 BROADCASTING MESSAGE to all: ${user.userName}: ${messageData.text}`);
           io.emit('new_message', message);
         }
         
