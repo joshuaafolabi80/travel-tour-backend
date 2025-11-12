@@ -2705,7 +2705,7 @@ const startServer = async () => {
       console.log(`📍   Peer-to-peer audio connections`);
       console.log(`\n🐛 Debug routes:`);
       console.log(`📍   Quiz collections debug: http://localhost:${PORT}/api/debug/quiz-collections`);
-      console.log(`📍   Quiz by destination debug: http://localhost:${Port}/api/debug/quiz-by-destination`);
+      console.log(`📍   Quiz by destination debug: http://localhost:${PORT}/api/debug/quiz-by-destination`);
       console.log(`📍   Messaging system: http://localhost:${PORT}/api/messages/`);
       console.log(`📍   Debug route: http://localhost:${PORT}/api/debug/messages-sent`);
       console.log(`📍   Auth test: http://localhost:${PORT}/api/debug/auth-test`);
