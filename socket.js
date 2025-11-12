@@ -108,7 +108,7 @@ const initializeSocket = (server) => {
       });
     });
 
-    // User joins a call - CRITICAL FIX 1 APPLIED HERE
+    // User joins a call - COMBINED FIX: Handles default room creation and consistent user data
     socket.on('join_call', (data) => {
       console.log(`🎯 SERVER: Received JOIN_CALL request:`, {
         callId: data.callId,
@@ -126,8 +126,7 @@ const initializeSocket = (server) => {
         return;
       }
 
-      // FIX: If it's the default chat room and no formal call is active, 
-      // create a temporary call object to manage participants and room status for chat.
+      // FIX 1: If it's the default chat room, create a state for it if it doesn't exist.
       if (!call && data.callId === 'community_call_default') {
         console.log(`⚠️ SERVER: Creating default call room state for ${data.callId}`);
         call = {
@@ -147,30 +146,24 @@ const initializeSocket = (server) => {
         return;
       }
 
-      // Update user data with the provided information
+      // FIX 2: Update user data in userSockets with the most specific info from join data (if available)
       const userWithCallData = {
         ...user,
         userId: data.userId || user.userId,
         userName: data.userName || user.userName,
         isAdmin: data.isAdmin || user.role === 'admin'
       };
-      
-      userSockets.set(socket.id, userWithCallData);
+      userSockets.set(socket.id, userWithCallData); // Store updated user data
 
       // Add user to call participants
-      call.participants.set(socket.id, userWithCallData);
-      
-      // CRITICAL FIX: Join the Socket.IO room with validation
+      call.participants.set(socket.id, userWithCallData); // Use updated data for call
+
+      // CRITICAL: Join the Socket.IO room
       socket.join(data.callId);
-      console.log(`✅ SERVER: USER JOINED ROOM: ${userWithCallData.userName} (${userWithCallData.userId}) joined room ${data.callId}`);
+      console.log(`✅ SERVER: USER JOINED ROOM: ${userWithCallData.userName} joined room ${data.callId}`);
       console.log(`✅ SERVER: Room ${data.callId} now has ${call.participants.size} participants`);
       
-      // Log all current participants in the room
-      const room = io.sockets.adapter.rooms.get(data.callId);
-      console.log(`📊 SERVER: Current sockets in room ${data.callId}:`, room ? Array.from(room) : 'None');
-      
       // Notify all participants in the call about new user
-      console.log(`📢 SERVER: Broadcasting user_joined_call to room ${data.callId}`);
       io.to(data.callId).emit('user_joined_call', {
         userName: userWithCallData.userName,
         userId: userWithCallData.userId,
@@ -221,9 +214,14 @@ const initializeSocket = (server) => {
           participants: Array.from(call.participants.values())
         });
         
-        // If no participants left, keep call active for others to join
+        // If no participants left, check if it was a default room to clean up
         if (call.participants.size === 0) {
-          console.log(`📞 SERVER: Call ${data.callId} has no participants, but remains active`);
+          if (data.callId === 'community_call_default') {
+            console.log(`🧹 SERVER: Removing default call ${data.callId} as last user left.`);
+            activeCalls.delete(data.callId);
+          } else {
+            console.log(`📞 SERVER: Call ${data.callId} has no participants, but remains active`);
+          }
         }
       }
     });
@@ -251,19 +249,13 @@ const initializeSocket = (server) => {
       }
     });
 
-    // Send message in community chat
+    // Send message in community chat - CRITICAL FIX 3 APPLIED HERE
     socket.on('send_message', (messageData) => {
-      console.log('💬 SERVER: Received SEND_MESSAGE:', {
-        callId: messageData.callId,
-        sender: messageData.sender,
-        text: messageData.text,
-        isAdmin: messageData.isAdmin,
-        socketId: socket.id
-      });
-
       const user = userSockets.get(socket.id);
+
       if (!user) {
         console.error('❌ SERVER: User not found for socket:', socket.id);
+        socket.emit('error', { message: 'User not registered. Please rejoin.' });
         return;
       }
 
@@ -271,21 +263,19 @@ const initializeSocket = (server) => {
         console.error('❌ SERVER: Empty message text');
         return;
       }
-
-      if (!messageData.callId) {
-        console.error('❌ SERVER: No callId provided in message');
-        return;
-      }
+      
+      // Determine the call ID, defaulting to the community chat room
+      const targetCallId = messageData.callId || 'community_call_default';
 
       // Create the message object with ALL required fields
       const message = {
         id: `msg_${Date.now()}_${socket.id}_${Math.random().toString(36).substr(2, 9)}`,
-        sender: messageData.sender || user.userName,
-        senderId: user.userId,
+        sender: user.userName, // CRITICAL: Use data from registry, not client input
+        senderId: user.userId, // CRITICAL: Use data from registry
         text: messageData.text.trim(),
         timestamp: new Date(messageData.timestamp || new Date()),
-        isAdmin: messageData.isAdmin || user.role === 'admin',
-        callId: messageData.callId,
+        isAdmin: user.role === 'admin', // CRITICAL: Use data from registry
+        callId: targetCallId,
         userId: user.userId,
         userName: user.userName,
         userRole: user.role
@@ -299,33 +289,26 @@ const initializeSocket = (server) => {
         communityMessages.splice(0, communityMessages.length - 1000);
       }
 
-      // CRITICAL FIX: Validate room exists and broadcast to ALL participants
-      const room = io.sockets.adapter.rooms.get(messageData.callId);
-      console.log(`📊 SERVER: Room ${messageData.callId} has ${room ? room.size : 0} participants`);
-      
-      if (room && room.size > 0) {
-        console.log(`📢 SERVER: Broadcasting message to room ${messageData.callId}:`);
-        console.log(`   From: ${user.userName} (${user.userId})`);
-        console.log(`   Text: ${message.text}`);
-        console.log(`   Participants in room: ${Array.from(room).join(', ')}`);
-        
-        // Broadcast to everyone in the call room INCLUDING the sender
-        io.to(messageData.callId).emit('new_message', message);
-        
-        console.log(`✅ SERVER: Message broadcast completed for room: ${messageData.callId}`);
-      } else {
-        console.error(`❌ SERVER: Room ${messageData.callId} does not exist or has no participants!`);
-        console.log(`❌ SERVER: Available rooms:`, Array.from(io.sockets.adapter.rooms.keys()));
-        
-        // Fallback: Try to broadcast to all connected users
-        console.log(`🔄 SERVER: Falling back to global broadcast`);
-        io.emit('new_message', message);
-      }
+      // CRITICAL: Broadcast to the specific call room (including the sender)
+      const room = io.sockets.adapter.rooms.get(targetCallId);
+      const participantCount = room ? room.size : 0;
+      
+      console.log(`📢 SERVER: Broadcasting message to room: ${targetCallId} with ${participantCount} participants`);
 
-      console.log(`💬 SERVER: ${user.userName} sent: ${message.text}`);
+      if (room && participantCount > 0) {
+        // Broadcast to everyone in the call room INCLUDING the sender
+        io.to(targetCallId).emit('new_message', message);
+        console.log(`✅ SERVER: Message broadcast completed for room: ${targetCallId}`);
+      } else {
+        console.error(`❌ SERVER: Room ${targetCallId} does not exist or has no participants.`);
+        // If the room doesn't exist, we must still send the message globally or to the sender as a confirmation.
+        // Sending globally is safer for a community chat if room membership is flaky.
+        io.emit('new_message', message);
+        console.log(`🔄 SERVER: Falling back to global broadcast for safety.`);
+      }
     });
 
-    // WebRTC signaling handlers
+    // WebRTC signaling handlers (kept as is)
     socket.on('webrtc_offer', (data) => {
       console.log(`📤 WebRTC offer from ${socket.id} to ${data.targetSocketId}`);
       socket.to(data.targetSocketId).emit('webrtc_offer', {
@@ -351,7 +334,7 @@ const initializeSocket = (server) => {
       });
     });
 
-    // Handle disconnection - CRITICAL FIX 1 APPLIED HERE (cleanup default room)
+    // Handle disconnection - CLEANUP DEFAULT ROOM
     socket.on('disconnect', () => {
       const user = userSockets.get(socket.id);
       if (user) {
