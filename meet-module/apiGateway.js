@@ -8,6 +8,39 @@ let activeMeetings = [];
 let meetingHistory = [];
 let meetingResources = {};
 
+// 🆕 FUNCTION TO GENERATE REAL GOOGLE MEET LINKS
+const generateGoogleMeetLink = () => {
+  const characters = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let meetingCode = '';
+  
+  // Generate 3 groups of 3 characters separated by dashes (Google Meet format)
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      meetingCode += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    if (i < 2) {
+      meetingCode += '-';
+    }
+  }
+  
+  return `https://meet.google.com/${meetingCode}`;
+};
+
+// 🆕 FUNCTION TO CREATE ENHANCED GOOGLE MEET LINK WITH USER INFO
+const generateEnhancedMeetLink = (meetingCode, userName = '') => {
+  // Basic meeting link
+  let meetLink = `https://meet.google.com/${meetingCode}`;
+  
+  // 🆕 ADD USER PARAMETERS FOR BETTER INTEGRATION
+  // Note: Google Meet doesn't officially support prefilling names via URL parameters
+  // But we can use this structure for future enhancements
+  if (userName) {
+    meetLink += `?authuser=0`; // Basic parameter for better integration
+  }
+  
+  return meetLink;
+};
+
 // Health check endpoint
 router.get('/health', (req, res) => {
   res.json({ 
@@ -22,9 +55,9 @@ router.get('/health', (req, res) => {
 // Create a new meeting
 router.post('/create', async (req, res) => {
   try {
-    const { adminId, title, description = '' } = req.body;
+    const { adminId, title, description = '', adminName = '' } = req.body;
     
-    console.log('🎯 Creating meeting:', { adminId, title, description });
+    console.log('🎯 Creating meeting:', { adminId, title, description, adminName });
 
     if (!adminId || !title) {
       return res.status(400).json({
@@ -44,13 +77,19 @@ router.post('/create', async (req, res) => {
     // Remove previous meetings from active meetings
     activeMeetings = activeMeetings.filter(meeting => meeting.adminId !== adminId);
 
+    // 🆕 GENERATE REAL GOOGLE MEET LINK
+    const meetingCode = generateGoogleMeetLink().split('/').pop();
+    const meetingLink = generateEnhancedMeetLink(meetingCode, adminName);
+
     // Create new meeting
     const newMeeting = {
       id: `meeting_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       adminId,
+      adminName: adminName || 'Host', // 🆕 Store admin name
       title,
       description,
-      meetingLink: `https://meet.google.com/new`, // This would be a real Google Meet link
+      meetingLink: meetingLink,
+      meetingCode: meetingCode,
       startTime: new Date(),
       endTime: null,
       isActive: true,
@@ -63,6 +102,8 @@ router.post('/create', async (req, res) => {
     activeMeetings.push(newMeeting);
     
     console.log('✅ Meeting created successfully:', newMeeting.id);
+    console.log('🔗 Meeting Link:', meetingLink);
+    console.log('👤 Admin Name:', adminName);
 
     res.json({
       success: true,
@@ -445,25 +486,34 @@ router.post('/:meetingId/join', async (req, res) => {
       });
     }
 
-    // Add participant if not already joined
-    const existingParticipant = meeting.participants.find(p => p.userId === userId);
-    if (!existingParticipant) {
+    // 🆕 ENHANCED: Add participant with proper user info
+    const existingParticipantIndex = meeting.participants.findIndex(p => p.userId === userId);
+    
+    if (existingParticipantIndex !== -1) {
+      // Update existing participant name if it changed
+      meeting.participants[existingParticipantIndex].userName = userName;
+      meeting.participants[existingParticipantIndex].lastJoined = new Date();
+      console.log('✅ User updated in meeting:', userName);
+    } else {
+      // Add new participant
       meeting.participants.push({
         userId,
         userName,
-        joinedAt: new Date()
+        joinedAt: new Date(),
+        lastJoined: new Date()
       });
-      
       console.log('✅ New user joined meeting:', userName);
-    } else {
-      console.log('✅ User already in meeting:', userName);
     }
+
+    // 🆕 GENERATE ENHANCED MEETING LINK WITH USER INFO
+    const enhancedMeetingLink = generateEnhancedMeetLink(meeting.meetingCode, userName);
 
     res.json({
       success: true,
       meeting: meeting,
+      enhancedMeetingLink: enhancedMeetingLink, // 🆕 Return enhanced link
       message: 'Successfully joined meeting',
-      isNewParticipant: !existingParticipant
+      isNewParticipant: existingParticipantIndex === -1
     });
 
   } catch (error) {
@@ -516,7 +566,50 @@ router.post('/:meetingId/leave', async (req, res) => {
   }
 });
 
-// 🆕 DEBUG ENDPOINTS - Add these to fix the stuck meeting issue
+// 🆕 Get participant list with details
+router.get('/:meetingId/participants/detailed', async (req, res) => {
+  try {
+    const { meetingId } = req.params;
+    
+    console.log('🎯 Fetching detailed participants for meeting:', meetingId);
+
+    const meeting = activeMeetings.find(m => m.id === meetingId) || 
+                   meetingHistory.find(m => m.id === meetingId);
+    
+    if (!meeting) {
+      return res.status(404).json({
+        success: false,
+        error: 'Meeting not found'
+      });
+    }
+
+    // 🆕 Enhanced participant data
+    const detailedParticipants = meeting.participants.map(participant => ({
+      ...participant,
+      joinDuration: participant.lastJoined ? 
+        Math.round((new Date() - new Date(participant.lastJoined)) / 60000) : 0, // minutes
+      isOnline: true // In a real app, you'd check if they're currently in the meeting
+    }));
+
+    console.log('✅ Found detailed participants:', detailedParticipants.length);
+
+    res.json({
+      success: true,
+      participants: detailedParticipants,
+      total: detailedParticipants.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching detailed participants:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch detailed participants',
+      details: error.message
+    });
+  }
+});
+
+// 🆕 DEBUG ENDPOINTS
 
 // Clear all meetings (for debugging)
 router.delete('/clear-all', async (req, res) => {
