@@ -6,7 +6,7 @@ const router = express.Router();
 // In-memory storage for meetings (you can replace with MongoDB later)
 let activeMeetings = [];
 let meetingHistory = [];
-let meetingResources = [];
+let meetingResources = {};
 
 // Health check endpoint
 router.get('/health', (req, res) => {
@@ -14,7 +14,8 @@ router.get('/health', (req, res) => {
     success: true, 
     status: 'Meet module is running',
     timestamp: new Date().toISOString(),
-    activeMeetings: activeMeetings.length
+    activeMeetings: activeMeetings.length,
+    meetingHistory: meetingHistory.length
   });
 });
 
@@ -32,7 +33,15 @@ router.post('/create', async (req, res) => {
       });
     }
 
-    // End any existing active meetings
+    // End any existing active meetings by this admin
+    const previousMeetings = activeMeetings.filter(meeting => meeting.adminId === adminId);
+    previousMeetings.forEach(meeting => {
+      meeting.isActive = false;
+      meeting.endTime = new Date();
+      meetingHistory.push(meeting);
+    });
+    
+    // Remove previous meetings from active meetings
     activeMeetings = activeMeetings.filter(meeting => meeting.adminId !== adminId);
 
     // Create new meeting
@@ -46,7 +55,9 @@ router.post('/create', async (req, res) => {
       endTime: null,
       isActive: true,
       participants: [],
-      createdAt: new Date()
+      createdAt: new Date(),
+      extensions: 0,
+      maxExtensions: 2
     };
 
     activeMeetings.push(newMeeting);
@@ -82,7 +93,8 @@ router.get('/active', async (req, res) => {
     res.json({
       success: true,
       meeting: activeMeeting,
-      totalActive: activeMeetings.filter(m => m.isActive).length
+      totalActive: activeMeetings.filter(m => m.isActive).length,
+      active: !!activeMeeting
     });
 
   } catch (error) {
@@ -119,10 +131,18 @@ router.post('/:meetingId/extend', async (req, res) => {
       });
     }
 
+    if (meeting.extensions >= meeting.maxExtensions) {
+      return res.status(400).json({
+        success: false,
+        error: 'Maximum extensions reached'
+      });
+    }
+
     // Simulate extending the meeting by 30 minutes
+    meeting.extensions += 1;
     meeting.endTime = new Date(Date.now() + 30 * 60 * 1000);
     
-    console.log('✅ Meeting extended:', meetingId);
+    console.log('✅ Meeting extended:', meetingId, 'Extensions:', meeting.extensions);
 
     res.json({
       success: true,
@@ -202,6 +222,15 @@ router.post('/resources/share', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'meetingId, resourceType, and content are required'
+      });
+    }
+
+    // Verify meeting exists and is active
+    const meeting = activeMeetings.find(m => m.id === resourceData.meetingId && m.isActive);
+    if (!meeting) {
+      return res.status(404).json({
+        success: false,
+        error: 'Active meeting not found'
       });
     }
 
@@ -424,14 +453,17 @@ router.post('/:meetingId/join', async (req, res) => {
         userName,
         joinedAt: new Date()
       });
+      
+      console.log('✅ New user joined meeting:', userName);
+    } else {
+      console.log('✅ User already in meeting:', userName);
     }
-
-    console.log('✅ User joined meeting:', userName);
 
     res.json({
       success: true,
       meeting: meeting,
-      message: 'Successfully joined meeting'
+      message: 'Successfully joined meeting',
+      isNewParticipant: !existingParticipant
     });
 
   } catch (error) {
@@ -462,9 +494,12 @@ router.post('/:meetingId/leave', async (req, res) => {
     }
 
     // Remove participant
-    meeting.participants = meeting.participants.filter(p => p.userId !== userId);
-
-    console.log('✅ User left meeting:', userId);
+    const participantIndex = meeting.participants.findIndex(p => p.userId === userId);
+    if (participantIndex !== -1) {
+      const leftParticipant = meeting.participants[participantIndex];
+      meeting.participants.splice(participantIndex, 1);
+      console.log('✅ User left meeting:', leftParticipant.userName);
+    }
 
     res.json({
       success: true,
@@ -477,6 +512,118 @@ router.post('/:meetingId/leave', async (req, res) => {
       success: false,
       error: 'Failed to leave meeting',
       details: error.message
+    });
+  }
+});
+
+// 🆕 DEBUG ENDPOINTS - Add these to fix the stuck meeting issue
+
+// Clear all meetings (for debugging)
+router.delete('/clear-all', async (req, res) => {
+  try {
+    console.log('🧹 Clearing all meetings...');
+    
+    const activeCount = activeMeetings.length;
+    const historyCount = meetingHistory.length;
+    const resourcesCount = Object.keys(meetingResources).length;
+    
+    // Move all active meetings to history
+    activeMeetings.forEach(meeting => {
+      meeting.isActive = false;
+      meeting.endTime = new Date();
+      meetingHistory.push(meeting);
+    });
+    
+    // Clear all data
+    activeMeetings = [];
+    meetingResources = {};
+    
+    console.log(`✅ Cleared ${activeCount} active meetings, ${historyCount} historical meetings, and ${resourcesCount} resource entries`);
+    
+    res.json({
+      success: true,
+      message: `Cleared ${activeCount} active meetings and ${resourcesCount} resource entries`,
+      cleared: {
+        activeMeetings: activeCount,
+        historicalMeetings: historyCount,
+        resourceEntries: resourcesCount
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error clearing meetings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to clear meetings'
+    });
+  }
+});
+
+// Get all meetings (for debugging)
+router.get('/debug/all', async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      activeMeetings: activeMeetings,
+      meetingHistory: meetingHistory,
+      meetingResources: meetingResources,
+      counts: {
+        active: activeMeetings.length,
+        history: meetingHistory.length,
+        resources: Object.keys(meetingResources).length
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error getting debug info:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get debug info'
+    });
+  }
+});
+
+// Clear meetings by admin ID
+router.delete('/clear-admin/:adminId', async (req, res) => {
+  try {
+    const { adminId } = req.params;
+    
+    console.log('🧹 Clearing meetings for admin:', adminId);
+    
+    const adminActiveMeetings = activeMeetings.filter(meeting => meeting.adminId === adminId);
+    const adminHistoryMeetings = meetingHistory.filter(meeting => meeting.adminId === adminId);
+    
+    // Move admin's active meetings to history
+    adminActiveMeetings.forEach(meeting => {
+      meeting.isActive = false;
+      meeting.endTime = new Date();
+      meetingHistory.push(meeting);
+    });
+    
+    // Remove admin's meetings from active meetings
+    activeMeetings = activeMeetings.filter(meeting => meeting.adminId !== adminId);
+    
+    // Clear admin's resources
+    Object.keys(meetingResources).forEach(meetingId => {
+      const meeting = activeMeetings.find(m => m.id === meetingId) || meetingHistory.find(m => m.id === meetingId);
+      if (meeting && meeting.adminId === adminId) {
+        delete meetingResources[meetingId];
+      }
+    });
+    
+    console.log(`✅ Cleared ${adminActiveMeetings.length} active meetings for admin ${adminId}`);
+    
+    res.json({
+      success: true,
+      message: `Cleared ${adminActiveMeetings.length} active meetings for admin ${adminId}`,
+      cleared: {
+        activeMeetings: adminActiveMeetings.length,
+        historicalMeetings: adminHistoryMeetings.length
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error clearing admin meetings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to clear admin meetings'
     });
   }
 });
