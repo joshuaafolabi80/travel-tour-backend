@@ -1,11 +1,10 @@
-//travel-tour-backend/server.js - COMPLETE INTEGRATED VERSION WITH WEBRTC AUDIO SUPPORT
+// travel-tour-backend/server.js - COMPLETE INTEGRATED VERSION WITH GOOGLE MEET SUPPORT
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const mammoth = require('mammoth');
-const { Server } = require('socket.io');
 const multer = require('multer');
 require('dotenv').config();
 
@@ -49,6 +48,10 @@ app.use('/api/uploads/courses/images', express.static(path.join(__dirname, 'uplo
 // ADDED: Serve static files from React build
 app.use(express.static(path.join(__dirname, '../dist')));
 
+// 🎯 GOOGLE MEET MODULE INTEGRATION - ADDED
+const MeetModuleGateway = require('./meet-module/apiGateway');
+app.use('/api/meet', require('./meet-module/apiGateway').router);
+
 // Public Routes (no auth required)
 const { router: authRouter, authMiddleware } = require('./routes/auth');
 const messageRoutes = require('./routes/messages');
@@ -56,13 +59,8 @@ const messageRoutes = require('./routes/messages');
 app.use('/api/auth', authRouter);
 app.use('/api/messages', messageRoutes);
 
-// ADDED: Community Routes
-const communityRoutes = require('./routes/communityRoutes');
-app.use('/api/community', communityRoutes);
-
-// ADDED: Agora Token Routes
-const agoraTokenRoutes = require('./routes/agoraToken');
-app.use('/api/agora', agoraTokenRoutes);
+// 🚨 REMOVED: Community Routes (WebRTC/Agora - old system)
+// 🚨 REMOVED: Agora Token Routes (WebRTC/Agora - old system)
 
 // 🚨 CRITICAL FIX: Configure multer for LARGE file uploads
 const storage = multer.diskStorage({
@@ -1415,8 +1413,10 @@ app.get('/api/debug-routes', (req, res) => {
     '/api/admin/mark-course-completed-read',
     '/api/general-course-questions',
     '/api/masterclass-course-questions',
-    '/api/community/messages',
-    '/api/community/active-call',
+    // 🎯 ADDED: Google Meet Integration Routes
+    '/api/meet/create',
+    '/api/meet/active',
+    '/api/meet/health',
     '/api/videos',
     '/api/videos/validate-masterclass-access',
     '/api/admin/upload-video',
@@ -2517,325 +2517,8 @@ app.get('*', (req, res) => {
   }
 });
 
-// 🔥 CRITICAL: SOCKET.IO SETUP WITH WEBRTC SUPPORT - FIXED CHAT MESSAGES
-const initializeSocket = (server) => {
-  const io = new Server(server, {
-    cors: {
-      origin: [
-        "http://localhost:5173", 
-        "http://localhost:5174",
-        "https://the-conclave-academy.netlify.app",
-        "https://travel-tour-academy-backend.onrender.com"
-      ],
-      methods: ["GET", "POST"],
-      credentials: true
-    }
-  });
-
-  const activeCalls = new Map();
-  const userSockets = new Map();
-  const communityMessages = [];
-
-  io.on('connection', (socket) => {
-    console.log('🔌 User connected:', socket.id);
-
-    // User joins the community
-    socket.on('user_join', (userData) => {
-      userSockets.set(socket.id, {
-        socketId: socket.id,
-        userId: userData.userId,
-        userName: userData.userName,
-        role: userData.role
-      });
-      
-      console.log(`👤 ${userData.userName} (${userData.role}) joined community with socket ID: ${socket.id}`);
-      
-      // Send current active calls to the user
-      if (activeCalls.size > 0) {
-        activeCalls.forEach((call, callId) => {
-          if (call.isActive) {
-            socket.emit('call_started', {
-              callId,
-              adminName: call.adminName,
-              message: `${call.adminName} has an active community call`,
-              startTime: call.startTime,
-              withAudio: true
-            });
-          }
-        });
-      }
-      
-      // Send message history
-      if (communityMessages.length > 0) {
-        socket.emit('message_history', communityMessages.slice(-50));
-      }
-      
-      // Broadcast to all users that someone joined
-      socket.broadcast.emit('user_online', {
-        userName: userData.userName,
-        userId: userData.userId,
-        role: userData.role,
-        socketId: socket.id
-      });
-    });
-
-    // Admin starts a community call
-    socket.on('admin_start_call', (callData) => {
-      const callId = `community_call_${Date.now()}`;
-      const adminUser = userSockets.get(socket.id);
-      
-      if (!adminUser || adminUser.role !== 'admin') {
-        socket.emit('error', { message: 'Only admins can start calls' });
-        return;
-      }
-
-      const call = {
-        id: callId,
-        adminId: adminUser.userId,
-        adminName: adminUser.userName,
-        participants: new Map([[socket.id, adminUser]]),
-        startTime: new Date(),
-        isActive: true,
-        createdAt: new Date(),
-        withAudio: callData.withAudio || true
-      };
-      
-      activeCalls.set(callId, call);
-      
-      console.log(`📞 Admin ${adminUser.userName} started call: ${callId} with WebRTC audio`);
-      
-      // Add admin as first participant
-      socket.join(callId);
-      
-      // Notify ALL users about the call
-      io.emit('call_started', {
-        callId,
-        adminName: adminUser.userName,
-        message: `${adminUser.userName} has started a community call with voice chat`,
-        startTime: call.startTime,
-        persistent: true,
-        withAudio: true
-      });
-      
-      // Send current participants to admin
-      socket.emit('call_participants_update', {
-        callId,
-        participants: Array.from(call.participants.values())
-      });
-    });
-
-    // User joins a call - UPDATED: Include user data
-    socket.on('join_call', (data) => {
-      const call = activeCalls.get(data.callId);
-      const user = userSockets.get(socket.id);
-      
-      if (!call || !call.isActive) {
-        socket.emit('error', { message: 'Call not found or ended' });
-        return;
-      }
-
-      if (!user) {
-        socket.emit('error', { message: 'User not registered' });
-        return;
-      }
-
-      // Add user to call participants with the provided user data
-      call.participants.set(socket.id, {
-        ...user,
-        userId: data.userId || user.userId,
-        userName: data.userName || user.userName,
-        isAdmin: data.isAdmin || user.role === 'admin'
-      });
-      
-      socket.join(data.callId);
-      
-      console.log(`👤 ${data.userName || user.userName} joined call: ${data.callId}`);
-      
-      // Notify all participants in the call about new user WITH USER DATA
-      io.to(data.callId).emit('user_joined_call', {
-        userId: data.userId || user.userId,
-        userName: data.userName || user.userName,
-        role: user.role,
-        socketId: socket.id,
-        participantCount: call.participants.size
-      });
-      
-      // Send updated participants list to everyone in call
-      io.to(data.callId).emit('call_participants_update', {
-        callId: data.callId,
-        participants: Array.from(call.participants.values())
-      });
-
-      // Notify existing participants to establish WebRTC with new user
-      socket.to(data.callId).emit('webrtc_new_participant', {
-        socketId: socket.id,
-        userName: user.userName
-      });
-    });
-
-    // User leaves a call
-    socket.on('leave_call', (data) => {
-      const call = activeCalls.get(data.callId);
-      const user = userSockets.get(socket.id);
-      
-      if (call && user) {
-        call.participants.delete(socket.id);
-        socket.leave(data.callId);
-        
-        console.log(`👤 ${user.userName} left call: ${data.callId}`);
-        
-        // Notify remaining participants
-        socket.to(data.callId).emit('user_left_call', {
-          userName: user.userName,
-          socketId: socket.id,
-          participantCount: call.participants.size
-        });
-        
-        // Send updated participants list
-        io.to(data.callId).emit('call_participants_update', {
-          callId: data.callId,
-          participants: Array.from(call.participants.values())
-        });
-        
-        // If no participants left, keep call active for others to join
-        if (call.participants.size === 0) {
-          console.log(`📞 Call ${data.callId} has no participants, but remains active`);
-        }
-      }
-    });
-
-    // Admin ends the call
-    socket.on('admin_end_call', (data) => {
-      const call = activeCalls.get(data.callId);
-      const adminUser = userSockets.get(socket.id);
-      
-      if (call && adminUser && adminUser.role === 'admin' && call.adminId === adminUser.userId) {
-        // Notify all participants
-        io.emit('call_ended', {
-          callId: data.callId,
-          message: 'Call has been ended by admin',
-          endedBy: adminUser.userName
-        });
-        
-        // Remove all participants from the room
-        io.socketsLeave(data.callId);
-        activeCalls.delete(data.callId);
-        
-        console.log(`📞 Call ended by admin: ${data.callId}`);
-      }
-    });
-
-    // 🔥 FIXED: Send message in community chat - PROPER MESSAGE FORMATTING
-    socket.on('send_message', (messageData) => {
-      const user = userSockets.get(socket.id);
-      if (user && messageData.text && messageData.text.trim()) {
-        const message = {
-          id: `msg_${Date.now()}_${socket.id}_${Math.random().toString(36).substr(2, 9)}`,
-          sender: messageData.sender || user.userName,
-          senderId: user.userId,
-          text: messageData.text.trim(),
-          timestamp: new Date(messageData.timestamp || new Date()),
-          isAdmin: messageData.isAdmin || user.role === 'admin',
-          callId: messageData.callId || null,
-          // 🆕 ADDED: Ensure consistent user identification
-          userId: user.userId,
-          userName: user.userName,
-          userRole: user.role
-        };
-        
-        console.log(`💬 SENDING MESSAGE: ${message.sender} (${message.userId}): ${message.text}`);
-        
-        // Store message persistently
-        communityMessages.push(message);
-        
-        // Keep only last 1000 messages
-        if (communityMessages.length > 1000) {
-          communityMessages.splice(0, communityMessages.length - 1000);
-        }
-        
-        // 🆕 FIXED: Broadcast message WITH PROPER FORMATTING AND TO CORRECT AUDIENCE
-        if (messageData.callId && messageData.callId !== 'undefined') {
-          console.log(`📢 Broadcasting to call: ${messageData.callId}`);
-          io.to(messageData.callId).emit('new_message', message);
-        } else {
-          console.log(`📢 Broadcasting to all users`);
-          io.emit('new_message', message);
-        }
-      } else {
-        console.error('❌ Invalid message data:', { user, messageData });
-      }
-    });
-
-    // 🔥 WEBRTC SIGNALING HANDLERS - CRITICAL FOR AUDIO
-    socket.on('webrtc_offer', (data) => {
-      console.log(`📤 WebRTC offer from ${socket.id} to ${data.targetSocketId}`);
-      socket.to(data.targetSocketId).emit('webrtc_offer', {
-        offer: data.offer,
-        senderSocketId: socket.id,
-        senderName: data.senderName
-      });
-    });
-
-    socket.on('webrtc_answer', (data) => {
-      console.log(`📤 WebRTC answer from ${socket.id} to ${data.targetSocketId}`);
-      socket.to(data.targetSocketId).emit('webrtc_answer', {
-        answer: data.answer,
-        senderSocketId: socket.id
-      });
-    });
-
-    socket.on('webrtc_ice_candidate', (data) => {
-      console.log(`🧊 WebRTC ICE candidate from ${socket.id} to ${data.targetSocketId}`);
-      socket.to(data.targetSocketId).emit('webrtc_ice_candidate', {
-        candidate: data.candidate,
-        senderSocketId: socket.id
-      });
-    });
-
-    // Handle disconnection
-    socket.on('disconnect', () => {
-      const user = userSockets.get(socket.id);
-      if (user) {
-        console.log(`👤 ${user.userName} disconnected`);
-        
-        // Remove user from all active calls
-        activeCalls.forEach((call, callId) => {
-          if (call.participants.has(socket.id)) {
-            call.participants.delete(socket.id);
-            
-            // Notify other participants
-            socket.to(callId).emit('user_left_call', {
-              userName: user.userName,
-              socketId: socket.id,
-              participantCount: call.participants.size
-            });
-            
-            // Send updated participants list
-            io.to(callId).emit('call_participants_update', {
-              callId: callId,
-              participants: Array.from(call.participants.values())
-            });
-            
-            // If admin disconnects, keep call active but notify
-            if (call.adminId === user.userId) {
-              io.emit('call_admin_away', {
-                callId: callId,
-                message: 'Admin has left the call, but call remains active',
-                adminName: user.userName
-              });
-            }
-          }
-        });
-        
-        userSockets.delete(socket.id);
-      }
-      
-      console.log('🔌 User disconnected:', socket.id);
-    });
-  });
-
-  return io;
-};
+// 🚨 REMOVED: WebRTC Socket.io setup (old system)
+// 🚨 REMOVED: All WebRTC/Agora related socket handlers
 
 // IMPROVED MONGODB CONNECTION WITH RETRY LOGIC
 const connectWithRetry = async (retries = 5, delay = 5000) => {
@@ -3011,15 +2694,10 @@ const startServer = async () => {
       console.log(`\n📊 VIDEO COUNT ROUTES - NEWLY ADDED:`);
       console.log(`📍   Get video counts: http://localhost:${PORT}/api/videos/count`);
       console.log(`📍   Get admin video counts: http://localhost:${PORT}/api/admin/videos/count`);
-      console.log(`\n👥 Community routes:`);
-      console.log(`📍   Community messages: http://localhost:${PORT}/api/community/messages`);
-      console.log(`📍   Active call: http://localhost:${PORT}/api/community/active-call`);
-      console.log(`\n🔊 AGORA TOKEN ROUTES - NEWLY ADDED:`);
-      console.log(`📍   Generate Agora token: http://localhost:${PORT}/api/agora/token`);
-      console.log(`\n🔊 WEBRTC AUDIO SUPPORT:`);
-      console.log(`📍   Real-time voice chat enabled`);
-      console.log(`📍   WebRTC signaling implemented`);
-      console.log(`📍   Peer-to-peer audio connections`);
+      console.log(`\n🎯 GOOGLE MEET INTEGRATION ROUTES - NEWLY ADDED:`);
+      console.log(`📍   Create meeting: http://localhost:${PORT}/api/meet/create`);
+      console.log(`📍   Get active meeting: http://localhost:${PORT}/api/meet/active`);
+      console.log(`📍   Meet health check: http://localhost:${PORT}/api/meet/health`);
       console.log(`\n🐛 Debug routes:`);
       console.log(`📍   Quiz collections debug: http://localhost:${PORT}/api/debug/quiz-collections`);
       console.log(`📍   Quiz by destination debug: http://localhost:${PORT}/api/debug/quiz-by-destination`);
@@ -3038,9 +2716,8 @@ const startServer = async () => {
       console.log('📝 Course descriptions: Fetched from general_course_questions collection');
       console.log('🎥 Video system: Cloudinary integration for video storage and streaming');
       console.log('📊 Video counts: New endpoints for accurate badge notifications');
-      console.log('🔊 WebRTC Audio: Real-time voice chat with peer-to-peer connections');
-      console.log('🔊 Agora Integration: Token generation for enhanced voice services');
-      console.log('👥 Community features: Real-time messaging and voice calls enabled');
+      console.log('🎯 GOOGLE MEET INTEGRATION: Professional video meetings with resource sharing');
+      console.log('🚫 WEBRTC/AGORA REMOVED: Old audio system completely removed');
       console.log('🌐 CORS configured for production: the-conclave-academy.netlify.app and travel-tour-academy-backend.onrender.com');
       console.log('📦 Frontend static files served from: ../dist directory');
       console.log('\n🚀 LARGE VIDEO UPLOAD SUPPORT ENABLED:');
@@ -3049,23 +2726,16 @@ const startServer = async () => {
       console.log('✅ Progress tracking for large files');
       console.log('✅ Fallback to local storage if Cloudinary fails');
       console.log('✅ Automatic cleanup of temporary files');
-      console.log('\n🔊 WEBRTC AUDIO FEATURES:');
-      console.log('✅ Real-time voice communication');
-      console.log('✅ Peer-to-peer audio streaming');
-      console.log('✅ Microphone permissions handling');
-      console.log('✅ Audio visualization');
-      console.log('✅ Mute/unmute functionality');
-      console.log('✅ Connection status monitoring');
-      console.log('\n🔊 AGORA INTEGRATION:');
-      console.log('✅ Token generation for secure voice calls');
-      console.log('✅ Channel-based authentication');
-      console.log('✅ User role management (publisher/subscriber)');
-      console.log('✅ Token expiration handling');
-      console.log('\n💬 CHAT SYSTEM FIXED:');
-      console.log('✅ Proper sender name display for all messages');
+      console.log('\n🎯 GOOGLE MEET FEATURES:');
+      console.log('✅ Professional video meetings');
+      console.log('✅ Resource sharing and persistence');
+      console.log('✅ Meeting time management');
+      console.log('✅ Automatic extensions');
+      console.log('✅ File upload support');
+      console.log('✅ Real-time notifications');
+      console.log('\n💬 CHAT SYSTEM:');
+      console.log('✅ Real-time messaging');
       console.log('✅ Admin badge showing for admin messages');
-      console.log('✅ System messages for user join/leave events');
-      console.log('✅ Real-time message broadcasting');
       console.log('✅ Message persistence and history');
     });
 
@@ -3079,19 +2749,13 @@ const startServer = async () => {
       console.log('💡 Server will continue running with basic functionality');
     }
 
-    // Initialize Socket.io for real-time communication with WebRTC
-    const io = initializeSocket(server);
-    console.log('🔌 Socket.io initialized for real-time communication with WebRTC support');
+    // 🚨 REMOVED: Socket.io initialization (WebRTC old system)
 
     // Handle graceful shutdown
     process.on('SIGINT', async () => {
       console.log('\n🛑 Shutting down gracefully...');
       server.close(() => {
         console.log('✅ HTTP server closed');
-        if (io) {
-          io.close();
-          console.log('✅ Socket.io closed');
-        }
         mongoose.connection.close().then(() => {
           console.log('✅ MongoDB connection closed');
           process.exit(0);
