@@ -1,7 +1,70 @@
-// travel-tour-backend/meet-module/apiGateway.js
 const express = require('express');
 const mongoose = require('mongoose');
+const multer = require('multer'); // 🆕 ADD MULTER
+const path = require('path'); // 🆕 ADD PATH
+const fs = require('fs'); // 🆕 ADD FS
 const router = express.Router();
+
+// 🆕 CREATE UPLOADS DIRECTORY IF IT DOESN'T EXIST
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// 🆕 CONFIGURE MULTER FOR FILE UPLOADS
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // 🚫 BLOCK VIDEOS
+    const videoMimes = [
+      'video/mp4', 'video/mpeg', 'video/avi', 'video/quicktime',
+      'video/x-msvideo', 'video/x-matroska', 'video/webm'
+    ];
+    if (videoMimes.includes(file.mimetype)) {
+      return cb(new Error('Video files are not supported to save storage space'), false);
+    }
+    
+    // ✅ ALLOW DOCUMENTS, PDFs, IMAGES, TEXT
+    const allowedMimes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain',
+      'text/csv',
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'image/svg+xml'
+    ];
+    
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type '${file.mimetype}' is not allowed. Supported types: PDF, Documents, Images, Text files`), false);
+    }
+  }
+});
+
+// 🆕 ADD STATIC FILE SERVING FOR UPLOADED FILES
+router.use('/uploads', express.static(uploadsDir));
 
 // 🆕 MEETING AND RESOURCE SCHEMAS
 const MeetingSchema = new mongoose.Schema({
@@ -40,6 +103,7 @@ const ResourceSchema = new mongoose.Schema({
   fileName: String,
   fileUrl: String,
   fileSize: Number,
+  mimeType: String, // 🆕 ADD MIME TYPE FIELD
   uploadedBy: String,
   uploadedByName: String,
   accessedBy: [{
@@ -208,23 +272,32 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// 🆕 ENHANCED SHARE RESOURCE WITH MONGODB PERSISTENCE
-router.post('/resources/share', async (req, res) => {
+// 🆕 ENHANCED SHARE RESOURCE WITH ACTUAL FILE UPLOAD
+router.post('/resources/share', upload.single('file'), async (req, res) => {
   try {
     const resourceData = req.body;
+    const file = req.file;
     
-    console.log('🎯 Sharing resource:', resourceData);
+    console.log('🎯 Sharing resource with file:', resourceData, file);
 
-    if (!resourceData.meetingId || !resourceData.resourceType || !resourceData.content) {
+    if (!resourceData.meetingId || !resourceData.resourceType) {
+      // If file was uploaded but validation fails, delete the file
+      if (file) {
+        fs.unlinkSync(file.path);
+      }
       return res.status(400).json({
         success: false,
-        error: 'meetingId, resourceType, and content are required'
+        error: 'meetingId and resourceType are required'
       });
     }
 
     // 🆕 VERIFY MEETING EXISTS AND IS ACTIVE IN DATABASE
     const meeting = await Meeting.findOne({ id: resourceData.meetingId, isActive: true });
     if (!meeting) {
+      // If file was uploaded but meeting not found, delete the file
+      if (file) {
+        fs.unlinkSync(file.path);
+      }
       return res.status(404).json({
         success: false,
         error: 'Active meeting not found'
@@ -234,10 +307,39 @@ router.post('/resources/share', async (req, res) => {
     // 🆕 VALIDATE RESOURCE TYPE (EXCLUDE VIDEOS)
     const allowedTypes = ['document', 'link', 'image', 'text', 'pdf'];
     if (!allowedTypes.includes(resourceData.resourceType)) {
+      if (file) {
+        fs.unlinkSync(file.path);
+      }
       return res.status(400).json({
         success: false,
         error: `Resource type must be one of: ${allowedTypes.join(', ')}. Video uploads are not supported.`
       });
+    }
+
+    let content = resourceData.content || '';
+    let fileName = resourceData.fileName || '';
+    let fileUrl = '';
+    let fileSize = 0;
+    let mimeType = '';
+
+    // 🆕 HANDLE FILE UPLOAD
+    if (file) {
+      fileUrl = `/api/meet/uploads/${file.filename}`;
+      fileName = file.originalname;
+      fileSize = file.size;
+      mimeType = file.mimetype;
+      content = `File: ${file.originalname}`;
+      
+      // Auto-detect resource type from file mimetype
+      if (resourceData.resourceType === 'document') {
+        if (file.mimetype === 'application/pdf') {
+          resourceData.resourceType = 'pdf';
+        } else if (file.mimetype.startsWith('image/')) {
+          resourceData.resourceType = 'image';
+        } else if (file.mimetype.startsWith('text/')) {
+          resourceData.resourceType = 'text';
+        }
+      }
     }
 
     // 🆕 CREATE RESOURCE IN DATABASE
@@ -245,11 +347,12 @@ router.post('/resources/share', async (req, res) => {
       id: `resource_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       meetingId: resourceData.meetingId,
       resourceType: resourceData.resourceType,
-      title: resourceData.title || 'Shared Resource',
-      content: resourceData.content,
-      fileName: resourceData.fileName,
-      fileUrl: resourceData.fileUrl,
-      fileSize: resourceData.fileSize || 0,
+      title: resourceData.title || fileName || 'Shared Resource',
+      content: content,
+      fileName: fileName,
+      fileUrl: fileUrl,
+      fileSize: fileSize,
+      mimeType: mimeType,
       uploadedBy: resourceData.uploadedBy,
       uploadedByName: resourceData.uploadedByName,
       accessedBy: [],
@@ -260,19 +363,107 @@ router.post('/resources/share', async (req, res) => {
     await newResource.save();
     
     console.log('✅ Resource shared and saved to database:', newResource.id);
+    if (file) {
+      console.log('📁 File saved:', fileUrl);
+    }
 
     res.json({
       success: true,
       resource: newResource,
-      message: 'Resource shared successfully and saved permanently!'
+      message: file ? 'File uploaded and shared successfully!' : 'Resource shared successfully!'
     });
 
   } catch (error) {
     console.error('❌ Error sharing resource:', error);
+    // Clean up uploaded file if there was an error
+    if (req.file) {
+      fs.unlinkSync(req.file.path);
+    }
     res.status(500).json({
       success: false,
       error: 'Failed to share resource',
       details: error.message
+    });
+  }
+});
+
+// 🆕 ADD SECURE FILE VIEWING ENDPOINT (NO DOWNLOADS)
+router.get('/uploads/:filename', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const filePath = path.join(uploadsDir, filename);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      });
+    }
+
+    // Set appropriate headers for INLINE VIEWING ONLY (no downloads)
+    const ext = path.extname(filename).toLowerCase();
+    const mimeTypes = {
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.txt': 'text/plain',
+      '.csv': 'text/csv',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml'
+    };
+
+    const mimeType = mimeTypes[ext] || 'application/octet-stream';
+    
+    // 🚫 CRITICAL: Set headers to force INLINE viewing and prevent downloads
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', 'inline'); // This forces browser to display, not download
+    res.setHeader('Content-Security-Policy', "default-src 'self'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+
+  } catch (error) {
+    console.error('❌ Error serving file:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to serve file'
+    });
+  }
+});
+
+// 🆕 ADD FILE DOWNLOAD ENDPOINT (FOR ADMIN USE ONLY)
+router.get('/uploads/:filename/download', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const filePath = path.join(uploadsDir, filename);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      });
+    }
+
+    // Set headers for download
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+
+  } catch (error) {
+    console.error('❌ Error downloading file:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to download file'
     });
   }
 });
@@ -309,6 +500,52 @@ router.get('/resources/meeting/:meetingId', async (req, res) => {
   }
 });
 
+// 🆕 ADDED: RECORD RESOURCE ACCESS
+router.post('/resources/:resourceId/access', async (req, res) => {
+  try {
+    const { resourceId } = req.params;
+    const { userId, action = 'view' } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId is required'
+      });
+    }
+
+    const resource = await Resource.findOne({ id: resourceId, isActive: true });
+    if (!resource) {
+      return res.status(404).json({
+        success: false,
+        error: 'Resource not found'
+      });
+    }
+
+    // Add access record
+    resource.accessedBy.push({
+      userId: userId,
+      userName: 'User', // You might want to pass userName from frontend
+      device: 'web',
+      action: action,
+      timestamp: new Date()
+    });
+
+    await resource.save();
+
+    res.json({
+      success: true,
+      message: 'Resource access recorded successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error recording resource access:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to record resource access'
+    });
+  }
+});
+
 // 🆕 ADDED: DELETE RESOURCE ENDPOINT - HARD DELETE (ACTUALLY REMOVES FROM DATABASE)
 router.delete('/resources/:resourceId', async (req, res) => {
   try {
@@ -334,6 +571,17 @@ router.delete('/resources/:resourceId', async (req, res) => {
     }
     
     console.log('✅ Found resource to delete:', resource.title, 'ID:', resource.id);
+    
+    // 🆕 DELETE ACTUAL FILE FROM SERVER IF IT EXISTS
+    if (resource.fileUrl) {
+      const filename = resource.fileUrl.split('/').pop();
+      const filePath = path.join(uploadsDir, filename);
+      
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log('🗑️ Deleted file from server:', filePath);
+      }
+    }
     
     // 🆕 ACTUAL HARD DELETE - COMPLETELY REMOVE FROM DATABASE
     console.log('🗑️ Executing MongoDB deleteOne operation...');
@@ -569,6 +817,16 @@ router.delete('/clear-all', async (req, res) => {
     // Deactivate all meetings
     await Meeting.updateMany({ isActive: true }, { isActive: false, endTime: new Date() });
     
+    // 🆕 DELETE ALL FILES FROM UPLOADS DIRECTORY
+    if (fs.existsSync(uploadsDir)) {
+      const files = fs.readdirSync(uploadsDir);
+      files.forEach(file => {
+        const filePath = path.join(uploadsDir, file);
+        fs.unlinkSync(filePath);
+        console.log('🗑️ Deleted file:', file);
+      });
+    }
+    
     // 🆕 ACTUALLY DELETE ALL RESOURCES
     const deleteResult = await Resource.deleteMany({});
     
@@ -583,7 +841,7 @@ router.delete('/clear-all', async (req, res) => {
     
     res.json({
       success: true,
-      message: 'Cleared all active meetings and PERMANENTLY deleted all resources',
+      message: 'Cleared all active meetings and PERMANENTLY deleted all resources and files',
       databaseStats: {
         totalMeetings: meetingCount,
         totalResources: resourceCount,
@@ -604,14 +862,24 @@ router.get('/debug/all', async (req, res) => {
     const meetings = await Meeting.find().sort({ createdAt: -1 });
     const resources = await Resource.find().sort({ createdAt: -1 });
     
+    // Get uploads directory info
+    let uploadsInfo = { exists: false, fileCount: 0, files: [] };
+    if (fs.existsSync(uploadsDir)) {
+      uploadsInfo.exists = true;
+      uploadsInfo.files = fs.readdirSync(uploadsDir);
+      uploadsInfo.fileCount = uploadsInfo.files.length;
+    }
+    
     res.json({
       success: true,
       meetings: meetings,
       resources: resources,
+      uploads: uploadsInfo,
       counts: {
         meetings: meetings.length,
         resources: resources.length,
-        activeMeetings: meetings.filter(m => m.isActive).length
+        activeMeetings: meetings.filter(m => m.isActive).length,
+        uploadedFiles: uploadsInfo.fileCount
       }
     });
   } catch (error) {
@@ -621,6 +889,30 @@ router.get('/debug/all', async (req, res) => {
       error: 'Failed to get debug info'
     });
   }
+});
+
+// 🆕 ERROR HANDLING MIDDLEWARE FOR MULTER
+router.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        success: false,
+        error: 'File too large. Maximum size is 50MB.'
+      });
+    }
+  }
+  
+  if (error.message) {
+    return res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+  
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error'
+  });
 });
 
 module.exports = { router };
