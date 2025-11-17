@@ -50,7 +50,7 @@ const ResourceSchema = new mongoose.Schema({
     timestamp: Date
   }],
   createdAt: Date,
-  isActive: { type: Boolean, default: true } // 🆕 ADDED for soft delete
+  isActive: { type: Boolean, default: true }
 }, { timestamps: true });
 
 // 🆕 MONGOOSE MODELS
@@ -309,38 +309,53 @@ router.get('/resources/meeting/:meetingId', async (req, res) => {
   }
 });
 
-// 🆕 ADDED: DELETE RESOURCE ENDPOINT
+// 🆕 ADDED: DELETE RESOURCE ENDPOINT - HARD DELETE (ACTUALLY REMOVES FROM DATABASE)
 router.delete('/resources/:resourceId', async (req, res) => {
   try {
     const { resourceId } = req.params;
     
-    console.log('🗑️ Deleting resource:', resourceId);
+    console.log('💀 HARD DELETING resource from database:', resourceId);
+    console.log('🔍 Searching for resource with ID:', resourceId);
     
-    // Find the resource first
+    // Find the resource first to return info about what was deleted
     const resource = await Resource.findOne({ id: resourceId });
     
     if (!resource) {
+      console.log('❌ Resource not found with ID:', resourceId);
+      console.log('🔍 Available resources in database:');
+      const allResources = await Resource.find({});
+      console.log('Total resources:', allResources.length);
+      allResources.forEach(r => console.log(`- ${r.id}: ${r.title}`));
+      
       return res.status(404).json({ 
         success: false, 
         error: 'Resource not found' 
       });
     }
     
-    // Soft delete - mark as inactive
-    await Resource.updateOne(
-      { id: resourceId },
-      { 
-        isActive: false,
-        deactivatedAt: new Date()
-      }
-    );
+    console.log('✅ Found resource to delete:', resource.title, 'ID:', resource.id);
     
-    console.log('✅ Resource marked as inactive:', resource.title, resourceId);
+    // 🆕 ACTUAL HARD DELETE - COMPLETELY REMOVE FROM DATABASE
+    console.log('🗑️ Executing MongoDB deleteOne operation...');
+    const deleteResult = await Resource.deleteOne({ id: resourceId });
+    
+    console.log('✅ Resource PERMANENTLY DELETED from database:', resource.title, resourceId);
+    console.log('🗑️ MongoDB delete result:', deleteResult);
+    
+    // Verify the resource is actually gone
+    const verifyResource = await Resource.findOne({ id: resourceId });
+    if (verifyResource) {
+      console.log('❌ WARNING: Resource still exists after deletion!');
+    } else {
+      console.log('✅ CONFIRMED: Resource successfully removed from database');
+    }
     
     res.json({
       success: true,
-      message: 'Resource deleted successfully',
-      deletedResource: resource
+      message: 'Resource PERMANENTLY deleted from database',
+      deletedResource: resource,
+      deleteCount: deleteResult.deletedCount,
+      verified: !verifyResource
     });
     
   } catch (error) {
@@ -554,6 +569,9 @@ router.delete('/clear-all', async (req, res) => {
     // Deactivate all meetings
     await Meeting.updateMany({ isActive: true }, { isActive: false, endTime: new Date() });
     
+    // 🆕 ACTUALLY DELETE ALL RESOURCES
+    const deleteResult = await Resource.deleteMany({});
+    
     // Clear active meetings cache
     activeMeetings = [];
     
@@ -561,13 +579,15 @@ router.delete('/clear-all', async (req, res) => {
     const resourceCount = await Resource.countDocuments();
     
     console.log(`✅ Cleared all active meetings. Total: ${meetingCount} meetings, ${resourceCount} resources in database`);
+    console.log(`🗑️ Deleted ${deleteResult.deletedCount} resources from database`);
     
     res.json({
       success: true,
-      message: 'Cleared all active meetings',
+      message: 'Cleared all active meetings and PERMANENTLY deleted all resources',
       databaseStats: {
         totalMeetings: meetingCount,
-        totalResources: resourceCount
+        totalResources: resourceCount,
+        resourcesDeleted: deleteResult.deletedCount
       }
     });
   } catch (error) {
