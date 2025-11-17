@@ -6,9 +6,9 @@ const Resource = require('../models/Resource');
 // ✅ SHARE RESOURCE
 router.post('/share', async (req, res) => {
   try {
-    const { meetingId, type, title, content, description, sharedBy, sharedByName } = req.body;
+    const { meetingId, resourceType, title, content, description, uploadedBy, uploadedByName, fileName, fileSize, createdAt } = req.body;
     
-    if (!meetingId || !type || !title || !content || !sharedBy || !sharedByName) {
+    if (!meetingId || !resourceType || !title || !content || !uploadedBy || !uploadedByName) {
       return res.status(400).json({
         success: false,
         message: 'Missing required fields'
@@ -16,15 +16,17 @@ router.post('/share', async (req, res) => {
     }
 
     const resourceData = {
-      resourceId: `res_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      resourceId: `resource_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       meetingId,
-      type,
+      type: resourceType,
       title,
       content,
       description: description || '',
-      sharedBy,
-      sharedByName,
-      sharedAt: new Date(),
+      sharedBy: uploadedBy,
+      sharedByName: uploadedByName,
+      fileName: fileName || null,
+      fileSize: fileSize || 0,
+      sharedAt: createdAt ? new Date(createdAt) : new Date(),
       accessedBy: [],
       accessCount: 0,
       downloadCount: 0,
@@ -125,6 +127,86 @@ router.get('/:resourceId', async (req, res) => {
   } catch (error) {
     console.error('Get resource error:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 🆕 ADDED: DELETE RESOURCE
+router.delete('/:resourceId', async (req, res) => {
+  try {
+    const { resourceId } = req.params;
+    
+    console.log(`🗑️ Deleting resource: ${resourceId}`);
+    
+    // Find the resource first
+    const resource = await Resource.findOne({ resourceId });
+    
+    if (!resource) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Resource not found' 
+      });
+    }
+    
+    // Instead of actually deleting, we'll mark it as inactive
+    // This preserves data integrity and allows for recovery if needed
+    await Resource.updateOne(
+      { resourceId },
+      { 
+        isActive: false,
+        deactivatedAt: new Date()
+      }
+    );
+    
+    console.log(`✅ Resource marked as inactive: ${resource.title} (${resourceId})`);
+    
+    res.json({
+      success: true,
+      message: 'Resource deleted successfully',
+      deletedResource: resource
+    });
+    
+  } catch (error) {
+    console.error('Delete resource error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// 🆕 ADDED: HARD DELETE RESOURCE (completely remove from database)
+router.delete('/:resourceId/hard', async (req, res) => {
+  try {
+    const { resourceId } = req.params;
+    
+    console.log(`💀 Hard deleting resource: ${resourceId}`);
+    
+    const resource = await Resource.findOne({ resourceId });
+    
+    if (!resource) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Resource not found' 
+      });
+    }
+    
+    // Actually delete the resource from the database
+    await Resource.deleteOne({ resourceId });
+    
+    console.log(`✅ Resource permanently deleted: ${resource.title} (${resourceId})`);
+    
+    res.json({
+      success: true,
+      message: 'Resource permanently deleted',
+      deletedResource: resource
+    });
+    
+  } catch (error) {
+    console.error('Hard delete resource error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 });
 
