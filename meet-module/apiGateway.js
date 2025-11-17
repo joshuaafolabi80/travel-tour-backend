@@ -49,7 +49,8 @@ const ResourceSchema = new mongoose.Schema({
     action: String,
     timestamp: Date
   }],
-  createdAt: Date
+  createdAt: Date,
+  isActive: { type: Boolean, default: true } // 🆕 ADDED for soft delete
 }, { timestamps: true });
 
 // 🆕 MONGOOSE MODELS
@@ -252,7 +253,8 @@ router.post('/resources/share', async (req, res) => {
       uploadedBy: resourceData.uploadedBy,
       uploadedByName: resourceData.uploadedByName,
       accessedBy: [],
-      createdAt: new Date()
+      createdAt: resourceData.createdAt ? new Date(resourceData.createdAt) : new Date(),
+      isActive: true
     });
 
     await newResource.save();
@@ -282,8 +284,11 @@ router.get('/resources/meeting/:meetingId', async (req, res) => {
     
     console.log('🎯 Fetching resources for meeting:', meetingId);
 
-    // 🆕 GET FROM DATABASE
-    const resources = await Resource.find({ meetingId: meetingId }).sort({ createdAt: -1 });
+    // 🆕 GET FROM DATABASE - Only active resources
+    const resources = await Resource.find({ 
+      meetingId: meetingId,
+      isActive: true 
+    }).sort({ createdAt: -1 });
     
     console.log('✅ Found resources in database:', resources.length);
 
@@ -300,6 +305,49 @@ router.get('/resources/meeting/:meetingId', async (req, res) => {
       success: false,
       error: 'Failed to fetch meeting resources',
       details: error.message
+    });
+  }
+});
+
+// 🆕 ADDED: DELETE RESOURCE ENDPOINT
+router.delete('/resources/:resourceId', async (req, res) => {
+  try {
+    const { resourceId } = req.params;
+    
+    console.log('🗑️ Deleting resource:', resourceId);
+    
+    // Find the resource first
+    const resource = await Resource.findOne({ id: resourceId });
+    
+    if (!resource) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Resource not found' 
+      });
+    }
+    
+    // Soft delete - mark as inactive
+    await Resource.updateOne(
+      { id: resourceId },
+      { 
+        isActive: false,
+        deactivatedAt: new Date()
+      }
+    );
+    
+    console.log('✅ Resource marked as inactive:', resource.title, resourceId);
+    
+    res.json({
+      success: true,
+      message: 'Resource deleted successfully',
+      deletedResource: resource
+    });
+    
+  } catch (error) {
+    console.error('❌ Error deleting resource:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
     });
   }
 });
