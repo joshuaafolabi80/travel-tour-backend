@@ -272,6 +272,144 @@ router.get('/active', async (req, res) => {
   }
 });
 
+// 🆕 ADD DIRECT RESOURCE VIEWING ENDPOINT (LIKE GENERAL COURSES)
+router.get('/resources/:resourceId/view', async (req, res) => {
+  try {
+    const { resourceId } = req.params;
+    
+    console.log('🎯 Viewing resource content:', resourceId);
+
+    const resource = await Resource.findOne({ id: resourceId, isActive: true });
+    if (!resource) {
+      return res.status(404).json({
+        success: false,
+        error: 'Resource not found'
+      });
+    }
+
+    // If it's a file resource, serve the file content
+    if (resource.fileUrl && resource.fileUrl.startsWith('/api/meet/uploads/')) {
+      const filename = resource.fileUrl.split('/').pop();
+      const filePath = path.join(uploadsDir, filename);
+      
+      if (fs.existsSync(filePath)) {
+        // Read file content based on file type
+        const fileExtension = path.extname(filename).toLowerCase();
+        
+        if (fileExtension === '.pdf') {
+          // For PDFs, return the file URL for inline viewing
+          return res.json({
+            success: true,
+            contentType: 'pdf',
+            content: resource.fileUrl,
+            title: resource.title,
+            resource: resource
+          });
+        } else if (['.txt', '.csv'].includes(fileExtension)) {
+          // For text files, read and return content
+          const content = fs.readFileSync(filePath, 'utf8');
+          return res.json({
+            success: true,
+            contentType: 'text',
+            content: content,
+            title: resource.title,
+            resource: resource
+          });
+        } else if (['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'].includes(fileExtension)) {
+          // For office documents, provide download link
+          return res.json({
+            success: true,
+            contentType: 'office',
+            content: `Office document: ${resource.fileName}. Use the download option.`,
+            title: resource.title,
+            resource: resource
+          });
+        } else if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(fileExtension)) {
+          // For images, return image URL
+          return res.json({
+            success: true,
+            contentType: 'image',
+            content: resource.fileUrl,
+            title: resource.title,
+            resource: resource
+          });
+        }
+      }
+    }
+
+    // For links and text content, return the content directly
+    res.json({
+      success: true,
+      contentType: resource.resourceType === 'link' ? 'link' : 'text',
+      content: resource.content,
+      title: resource.title,
+      resource: resource
+    });
+
+  } catch (error) {
+    console.error('❌ Error viewing resource:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load resource content'
+    });
+  }
+});
+
+// 🆕 ADD FILE CONTENT SERVING ENDPOINT
+router.get('/file-content/:filename', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const filePath = path.join(uploadsDir, filename);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      });
+    }
+
+    const ext = path.extname(filename).toLowerCase();
+    
+    // For text files, read and return content
+    if (['.txt', '.csv'].includes(ext)) {
+      const content = fs.readFileSync(filePath, 'utf8');
+      return res.json({
+        success: true,
+        contentType: 'text/plain',
+        content: content,
+        filename: filename
+      });
+    }
+    
+    // For other files, serve the file
+    const mimeTypes = {
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif'
+    };
+
+    const mimeType = mimeTypes[ext] || 'application/octet-stream';
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', 'inline');
+    
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+
+  } catch (error) {
+    console.error('❌ Error serving file content:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to serve file content'
+    });
+  }
+});
+
 // 🆕 ENHANCED SHARE RESOURCE WITH ACTUAL FILE UPLOAD
 router.post('/resources/share', upload.single('file'), async (req, res) => {
   try {
