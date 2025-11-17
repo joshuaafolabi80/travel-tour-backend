@@ -1,8 +1,8 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const multer = require('multer'); // 🆕 ADD MULTER
-const path = require('path'); // 🆕 ADD PATH
-const fs = require('fs'); // 🆕 ADD FS
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const router = express.Router();
 
 // 🆕 CREATE UPLOADS DIRECTORY IF IT DOESN'T EXIST
@@ -95,7 +95,7 @@ const ResourceSchema = new mongoose.Schema({
   meetingId: String,
   resourceType: {
     type: String,
-    enum: ['document', 'link', 'image', 'text', 'pdf'], // 🆕 EXCLUDED VIDEO
+    enum: ['document', 'link', 'image', 'text', 'pdf'],
     required: true
   },
   title: String,
@@ -103,7 +103,7 @@ const ResourceSchema = new mongoose.Schema({
   fileName: String,
   fileUrl: String,
   fileSize: Number,
-  mimeType: String, // 🆕 ADD MIME TYPE FIELD
+  mimeType: String,
   uploadedBy: String,
   uploadedByName: String,
   accessedBy: [{
@@ -275,10 +275,29 @@ router.get('/active', async (req, res) => {
 // 🆕 ENHANCED SHARE RESOURCE WITH ACTUAL FILE UPLOAD
 router.post('/resources/share', upload.single('file'), async (req, res) => {
   try {
-    const resourceData = req.body;
+    // Parse form data fields
+    const resourceData = {
+      meetingId: req.body.meetingId,
+      resourceType: req.body.resourceType,
+      title: req.body.title,
+      content: req.body.content,
+      fileName: req.body.fileName,
+      uploadedBy: req.body.uploadedBy,
+      uploadedByName: req.body.uploadedByName,
+      createdAt: req.body.createdAt
+    };
+    
     const file = req.file;
     
-    console.log('🎯 Sharing resource with file:', resourceData, file);
+    console.log('🎯 Sharing resource with file upload:', {
+      resourceData: resourceData,
+      file: file ? {
+        originalname: file.originalname,
+        filename: file.filename,
+        size: file.size,
+        mimetype: file.mimetype
+      } : 'No file'
+    });
 
     if (!resourceData.meetingId || !resourceData.resourceType) {
       // If file was uploaded but validation fails, delete the file
@@ -328,7 +347,7 @@ router.post('/resources/share', upload.single('file'), async (req, res) => {
       fileName = file.originalname;
       fileSize = file.size;
       mimeType = file.mimetype;
-      content = `File: ${file.originalname}`;
+      content = `File: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
       
       // Auto-detect resource type from file mimetype
       if (resourceData.resourceType === 'document') {
@@ -363,9 +382,12 @@ router.post('/resources/share', upload.single('file'), async (req, res) => {
     await newResource.save();
     
     console.log('✅ Resource shared and saved to database:', newResource.id);
-    if (file) {
-      console.log('📁 File saved:', fileUrl);
-    }
+    console.log('📁 File details:', {
+      fileName: fileName,
+      fileUrl: fileUrl,
+      fileSize: fileSize,
+      mimeType: mimeType
+    });
 
     res.json({
       success: true,
@@ -379,6 +401,75 @@ router.post('/resources/share', upload.single('file'), async (req, res) => {
     if (req.file) {
       fs.unlinkSync(req.file.path);
     }
+    res.status(500).json({
+      success: false,
+      error: 'Failed to share resource',
+      details: error.message
+    });
+  }
+});
+
+// 🆕 ORIGINAL SHARE RESOURCE ENDPOINT (FOR BACKWARD COMPATIBILITY)
+router.post('/resources/share-json', async (req, res) => {
+  try {
+    const resourceData = req.body;
+    
+    console.log('🎯 Sharing resource (JSON):', resourceData);
+
+    if (!resourceData.meetingId || !resourceData.resourceType || !resourceData.content) {
+      return res.status(400).json({
+        success: false,
+        error: 'meetingId, resourceType, and content are required'
+      });
+    }
+
+    // 🆕 VERIFY MEETING EXISTS AND IS ACTIVE IN DATABASE
+    const meeting = await Meeting.findOne({ id: resourceData.meetingId, isActive: true });
+    if (!meeting) {
+      return res.status(404).json({
+        success: false,
+        error: 'Active meeting not found'
+      });
+    }
+
+    // 🆕 VALIDATE RESOURCE TYPE (EXCLUDE VIDEOS)
+    const allowedTypes = ['document', 'link', 'image', 'text', 'pdf'];
+    if (!allowedTypes.includes(resourceData.resourceType)) {
+      return res.status(400).json({
+        success: false,
+        error: `Resource type must be one of: ${allowedTypes.join(', ')}. Video uploads are not supported.`
+      });
+    }
+
+    // 🆕 CREATE RESOURCE IN DATABASE
+    const newResource = new Resource({
+      id: `resource_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      meetingId: resourceData.meetingId,
+      resourceType: resourceData.resourceType,
+      title: resourceData.title || 'Shared Resource',
+      content: resourceData.content,
+      fileName: resourceData.fileName,
+      fileUrl: resourceData.fileUrl,
+      fileSize: resourceData.fileSize || 0,
+      uploadedBy: resourceData.uploadedBy,
+      uploadedByName: resourceData.uploadedByName,
+      accessedBy: [],
+      createdAt: resourceData.createdAt ? new Date(resourceData.createdAt) : new Date(),
+      isActive: true
+    });
+
+    await newResource.save();
+    
+    console.log('✅ Resource shared and saved to database:', newResource.id);
+
+    res.json({
+      success: true,
+      resource: newResource,
+      message: 'Resource shared successfully and saved permanently!'
+    });
+
+  } catch (error) {
+    console.error('❌ Error sharing resource:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to share resource',
@@ -524,7 +615,7 @@ router.post('/resources/:resourceId/access', async (req, res) => {
     // Add access record
     resource.accessedBy.push({
       userId: userId,
-      userName: 'User', // You might want to pass userName from frontend
+      userName: 'User',
       device: 'web',
       action: action,
       timestamp: new Date()
@@ -912,6 +1003,16 @@ router.use((error, req, res, next) => {
   res.status(500).json({
     success: false,
     error: 'Internal server error'
+  });
+});
+
+// 404 handler for undefined routes
+router.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Endpoint not found',
+    path: req.originalUrl,
+    method: req.method
   });
 });
 

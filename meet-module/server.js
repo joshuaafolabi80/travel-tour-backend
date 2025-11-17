@@ -1,39 +1,215 @@
-// travel-tour-backend/meet-module/server.js
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
 
 // Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://travel-tour-academy.onrender.com',
+    'https://travel-tour-academy-frontend.onrender.com'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 
-// Database Connection (USING YOUR EXISTING MONGODB)
-const connectDB = require('./config/database');
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Routes
-app.use('/api/meetings', require('./routes/meetings'));
-app.use('/api/resources', require('./routes/resources'));
-app.use('/api/uploads', require('./routes/uploads'));
+// Database Connection
+const connectDB = async () => {
+  try {
+    // Use the same MongoDB connection as your main app
+    const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/travel_tour_meet';
+    
+    console.log('🔗 Connecting to MongoDB...');
+    console.log('📊 Database:', mongoURI);
+    
+    await mongoose.connect(mongoURI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    
+    console.log('✅ MongoDB Connected Successfully');
+    console.log('📁 Database Name:', mongoose.connection.name);
+    
+    // Check connection status
+    mongoose.connection.on('connected', () => {
+      console.log('🎯 Mongoose connected to MongoDB');
+    });
+    
+    mongoose.connection.on('error', (err) => {
+      console.error('❌ Mongoose connection error:', err);
+    });
+    
+    mongoose.connection.on('disconnected', () => {
+      console.log('⚠️ Mongoose disconnected from MongoDB');
+    });
+    
+  } catch (error) {
+    console.error('❌ MongoDB connection failed:', error.message);
+    process.exit(1);
+  }
+};
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    module: 'Google Meet Integration',
+// 🆕 CREATE UPLOADS DIRECTORY IF IT DOESN'T EXIST
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('📁 Created uploads directory:', uploadsDir);
+}
+
+// 🆕 USE THE SINGLE API GATEWAY INSTEAD OF SEPARATE ROUTES
+console.log('🔄 Loading Meet Module API Gateway...');
+const { router: meetApiGateway } = require('./apiGateway');
+app.use('/api/meet', meetApiGateway);
+
+console.log('✅ Meet Module API Gateway mounted at /api/meet');
+
+// Enhanced Health check with detailed info
+app.get('/health', async (req, res) => {
+  try {
+    const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+    const activeConnections = mongoose.connection.readyState;
+    
+    // Check if uploads directory exists and get file count
+    let uploadsInfo = { exists: false, fileCount: 0 };
+    if (fs.existsSync(uploadsDir)) {
+      uploadsInfo.exists = true;
+      const files = fs.readdirSync(uploadsDir);
+      uploadsInfo.fileCount = files.length;
+    }
+    
+    res.json({ 
+      success: true,
+      status: 'Meet Module is running', 
+      module: 'Travel Tour Academy - Meet Module',
+      timestamp: new Date().toISOString(),
+      serverTime: new Date().toLocaleString(),
+      database: {
+        status: dbStatus,
+        connectionState: activeConnections,
+        name: mongoose.connection.name || 'Not connected'
+      },
+      uploads: uploadsInfo,
+      endpoints: {
+        base: '/api/meet',
+        health: '/api/meet/health',
+        meetings: '/api/meet/create, /api/meet/active, etc.',
+        resources: '/api/meet/resources/share, /api/meet/resources/meeting/:id',
+        files: '/api/meet/uploads/:filename'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      status: 'Error',
+      error: error.message
+    });
+  }
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: '🚀 Travel Tour Academy - Meet Module API',
+    version: '1.0.0',
+    description: 'Real-time meeting and resource sharing module',
+    endpoints: {
+      health: '/health',
+      api: '/api/meet',
+      documentation: 'See /health for detailed endpoint information'
+    },
     timestamp: new Date().toISOString()
   });
 });
 
-// Start on DIFFERENT PORT (3001 vs your main app's port)
+// Global error handling middleware
+app.use((error, req, res, next) => {
+  console.error('🚨 Global Error Handler:', error);
+  
+  if (error.name === 'ValidationError') {
+    return res.status(400).json({
+      success: false,
+      error: 'Validation Error',
+      details: error.message
+    });
+  }
+  
+  if (error.name === 'CastError') {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid ID format',
+      details: error.message
+    });
+  }
+  
+  // Default error
+  res.status(500).json({
+    success: false,
+    error: 'Internal Server Error',
+    message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+  });
+});
+
+// 404 handler for undefined routes
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Endpoint not found',
+    path: req.originalUrl,
+    method: req.method,
+    availableEndpoints: {
+      root: 'GET /',
+      health: 'GET /health',
+      meetApi: 'GET /api/meet/*'
+    }
+  });
+});
+
+// Graceful shutdown handling
+process.on('SIGINT', async () => {
+  console.log('🛑 Received SIGINT. Shutting down gracefully...');
+  await mongoose.connection.close();
+  console.log('✅ MongoDB connection closed.');
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('🛑 Received SIGTERM. Shutting down gracefully...');
+  await mongoose.connection.close();
+  console.log('✅ MongoDB connection closed.');
+  process.exit(0);
+});
+
+// Start server
 const PORT = process.env.MEET_MODULE_PORT || 3001;
+const HOST = process.env.HOST || '0.0.0.0';
 
 connectDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`🎯 Meet Module running on port ${PORT}`);
-    console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+  app.listen(PORT, HOST, () => {
+    console.log('='.repeat(60));
+    console.log('🚀 TRAVEL TOUR ACADEMY - MEET MODULE');
+    console.log('='.repeat(60));
+    console.log(`📍 Server running on: http://${HOST}:${PORT}`);
+    console.log(`🔗 Health Check: http://${HOST}:${PORT}/health`);
+    console.log(`🎯 API Gateway: http://${HOST}:${PORT}/api/meet`);
+    console.log(`📁 Uploads Directory: ${uploadsDir}`);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`⏰ Server Time: ${new Date().toLocaleString()}`);
+    console.log('='.repeat(60));
+    console.log('✅ Meet Module is ready to handle requests!');
+    console.log('='.repeat(60));
   });
+}).catch(err => {
+  console.error('❌ Failed to start Meet Module:', err);
+  process.exit(1);
 });
