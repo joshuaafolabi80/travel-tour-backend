@@ -136,37 +136,6 @@ const generateWorkingMeetingLink = (meetingId, userName = '') => {
   return `https://meet.jit.si/${meetingId}`;
 };
 
-// 🆕 PREVENT AUTO-DELETION - KEEP RESOURCES PERMANENTLY
-const cleanupOldResources = async () => {
-  try {
-    console.log('🔄 Checking for old resources to cleanup...');
-    
-    // Only delete resources that are explicitly marked for deletion
-    // Don't auto-delete based on time - keep everything permanent
-    const deletionCount = await Resource.countDocuments({ 
-      isActive: false,
-      // Only delete if explicitly marked inactive for more than 30 days
-      updatedAt: { $lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-    });
-    
-    if (deletionCount > 0) {
-      console.log(`🗑️ Found ${deletionCount} old inactive resources to delete`);
-      // Uncomment below if you want to actually delete old inactive resources
-      // await Resource.deleteMany({ 
-      //   isActive: false,
-      //   updatedAt: { $lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-      // });
-    } else {
-      console.log('✅ No old resources to cleanup - keeping all resources permanent');
-    }
-  } catch (error) {
-    console.error('❌ Error during resource cleanup:', error);
-  }
-};
-
-// Call this on startup (optional)
-cleanupOldResources();
-
 // Health check endpoint
 router.get('/health', async (req, res) => {
   try {
@@ -303,7 +272,7 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// 🆕 FIXED DIRECT RESOURCE VIEWING ENDPOINT (WORKS LIKE GENERAL COURSES)
+// 🆕 ADD DIRECT RESOURCE VIEWING ENDPOINT (LIKE GENERAL COURSES)
 router.get('/resources/:resourceId/view', async (req, res) => {
   try {
     const { resourceId } = req.params;
@@ -318,7 +287,7 @@ router.get('/resources/:resourceId/view', async (req, res) => {
       });
     }
 
-    // If it's a file resource, serve the actual file content
+    // If it's a file resource, serve the file content
     if (resource.fileUrl && resource.fileUrl.startsWith('/api/meet/uploads/')) {
       const filename = resource.fileUrl.split('/').pop();
       const filePath = path.join(uploadsDir, filename);
@@ -337,58 +306,21 @@ router.get('/resources/:resourceId/view', async (req, res) => {
             resource: resource
           });
         } else if (['.txt', '.csv'].includes(fileExtension)) {
-          // For text files, read and return content (LIKE GENERAL COURSES)
-          try {
-            const content = fs.readFileSync(filePath, 'utf8');
-            return res.json({
-              success: true,
-              contentType: 'text',
-              content: content,
-              title: resource.title,
-              resource: resource
-            });
-          } catch (readError) {
-            console.error('Error reading text file:', readError);
-            return res.json({
-              success: true,
-              contentType: 'text',
-              content: `Text file: ${resource.fileName}. Content cannot be displayed directly.`,
-              title: resource.title,
-              resource: resource
-            });
-          }
-        } else if (['.doc', '.docx'].includes(fileExtension)) {
-          // 🆕 CRITICAL FIX: For Word documents, use mammoth to convert to HTML (LIKE GENERAL COURSES)
-          try {
-            const mammoth = require('mammoth');
-            const result = await mammoth.convertToHtml({ path: filePath });
-            const htmlContent = result.value;
-            
-            return res.json({
-              success: true,
-              contentType: 'html',
-              content: htmlContent,
-              title: resource.title,
-              resource: resource,
-              hasImages: htmlContent.includes('<img'),
-              source: 'html-conversion'
-            });
-          } catch (conversionError) {
-            console.error('DOCX conversion failed:', conversionError);
-            return res.json({
-              success: true,
-              contentType: 'text',
-              content: `Word document: ${resource.fileName}. Use the download option for best viewing.`,
-              title: resource.title,
-              resource: resource
-            });
-          }
-        } else if (['.xls', '.xlsx', '.ppt', '.pptx'].includes(fileExtension)) {
-          // For other office documents, provide information
+          // For text files, read and return content
+          const content = fs.readFileSync(filePath, 'utf8');
           return res.json({
             success: true,
             contentType: 'text',
-            content: `Office document: ${resource.fileName}. This document type is best viewed by downloading.`,
+            content: content,
+            title: resource.title,
+            resource: resource
+          });
+        } else if (['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'].includes(fileExtension)) {
+          // For office documents, provide download link
+          return res.json({
+            success: true,
+            contentType: 'office',
+            content: `Office document: ${resource.fileName}. Use the download option.`,
             title: resource.title,
             resource: resource
           });
@@ -402,19 +334,10 @@ router.get('/resources/:resourceId/view', async (req, res) => {
             resource: resource
           });
         }
-      } else {
-        // File doesn't exist on server
-        return res.json({
-          success: true,
-          contentType: 'text',
-          content: `File not found on server: ${resource.fileName}`,
-          title: resource.title,
-          resource: resource
-        });
       }
     }
 
-    // For links and text content, return the content directly (LIKE GENERAL COURSES)
+    // For links and text content, return the content directly
     res.json({
       success: true,
       contentType: resource.resourceType === 'link' ? 'link' : 'text',
