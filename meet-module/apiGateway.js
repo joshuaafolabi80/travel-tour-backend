@@ -303,7 +303,7 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// 🆕 FIXED DIRECT RESOURCE VIEWING ENDPOINT (WORKS LIKE GENERAL COURSES)
+// 🆕 FIXED DIRECT RESOURCE VIEWING ENDPOINT WITH TEXT JUSTIFICATION
 router.get('/resources/:resourceId/view', async (req, res) => {
   try {
     const { resourceId } = req.params;
@@ -328,18 +328,43 @@ router.get('/resources/:resourceId/view', async (req, res) => {
         const fileExtension = path.extname(filename).toLowerCase();
         
         if (fileExtension === '.pdf') {
-          // For PDFs, return the file URL for inline viewing
+          // 🆕 FIXED: For PDFs, return the correct file URL
           return res.json({
             success: true,
             contentType: 'pdf',
-            content: resource.fileUrl,
+            content: `/uploads/${filename}`, // Fixed URL - no double /api/meet/
             title: resource.title,
             resource: resource
           });
         } else if (['.txt', '.csv'].includes(fileExtension)) {
           // For text files, read and return content (LIKE GENERAL COURSES)
           try {
-            const content = fs.readFileSync(filePath, 'utf8');
+            let content = fs.readFileSync(filePath, 'utf8');
+            
+            // 🆕 ADD TEXT JUSTIFICATION WRAPPER FOR PLAIN TEXT
+            if (fileExtension === '.txt') {
+              content = `<div class="justified-text" style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px;">${content.replace(/\n/g, '<br>')}</div>`;
+              return res.json({
+                success: true,
+                contentType: 'html', // Changed to HTML to support styling
+                content: content,
+                title: resource.title,
+                resource: resource
+              });
+            }
+            
+            // For CSV files, keep as plain text but with monospace font
+            if (fileExtension === '.csv') {
+              content = `<div style="font-family: 'Courier New', monospace; font-size: 14px; white-space: pre; background: #f8f9fa; padding: 15px; border-radius: 5px;">${content}</div>`;
+              return res.json({
+                success: true,
+                contentType: 'html',
+                content: content,
+                title: resource.title,
+                resource: resource
+              });
+            }
+            
             return res.json({
               success: true,
               contentType: 'text',
@@ -362,7 +387,24 @@ router.get('/resources/:resourceId/view', async (req, res) => {
           try {
             const mammoth = require('mammoth');
             const result = await mammoth.convertToHtml({ path: filePath });
-            const htmlContent = result.value;
+            let htmlContent = result.value;
+            
+            // 🆕 ADD JUSTIFICATION STYLING TO CONVERTED DOCUMENT
+            htmlContent = htmlContent.replace(
+              /<body([^>]*)>/i, 
+              '<body$1 style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: \'Segoe UI\', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px;">'
+            );
+            
+            // 🆕 WRAP CONTENT IN JUSTIFIED CONTAINER IF NO BODY TAG
+            if (!htmlContent.includes('<body')) {
+              htmlContent = `<div style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px;">${htmlContent}</div>`;
+            }
+            
+            // 🆕 ENSURE ALL PARAGRAPHS ARE JUSTIFIED
+            htmlContent = htmlContent.replace(
+              /<p([^>]*)>/gi, 
+              '<p$1 style="text-align: justify; margin-bottom: 1em;">'
+            );
             
             return res.json({
               success: true,
@@ -393,11 +435,20 @@ router.get('/resources/:resourceId/view', async (req, res) => {
             resource: resource
           });
         } else if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(fileExtension)) {
-          // For images, return image URL
+          // 🆕 FIXED: For images, return correct image URL
           return res.json({
             success: true,
             contentType: 'image',
-            content: resource.fileUrl,
+            content: `/uploads/${filename}`, // Fixed URL - no double /api/meet/
+            title: resource.title,
+            resource: resource
+          });
+        } else {
+          // Unknown file type
+          return res.json({
+            success: true,
+            contentType: 'text',
+            content: `File: ${resource.fileName}. This file type cannot be displayed directly.`,
             title: resource.title,
             resource: resource
           });
@@ -415,10 +466,20 @@ router.get('/resources/:resourceId/view', async (req, res) => {
     }
 
     // For links and text content, return the content directly (LIKE GENERAL COURSES)
+    // 🆕 ADD JUSTIFICATION FOR PLAIN TEXT CONTENT
+    let contentType = resource.resourceType === 'link' ? 'link' : 'text';
+    let content = resource.content;
+    
+    // If it's text content, wrap it in justified styling
+    if (contentType === 'text' && content) {
+      content = `<div style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px; white-space: pre-wrap;">${content}</div>`;
+      contentType = 'html'; // Change to HTML to apply styling
+    }
+
     res.json({
       success: true,
-      contentType: resource.resourceType === 'link' ? 'link' : 'text',
-      content: resource.content,
+      contentType: contentType,
+      content: content,
       title: resource.title,
       resource: resource
     });
