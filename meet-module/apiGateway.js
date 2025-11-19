@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { google } = require('googleapis'); // 🆕 ADD GOOGLE APIs
 const router = express.Router();
 
 // 🆕 CREATE UPLOADS DIRECTORY IF IT DOESN'T EXIST
@@ -87,7 +88,9 @@ const MeetingSchema = new mongoose.Schema({
   createdAt: Date,
   extensions: Number,
   maxExtensions: Number,
-  meetingType: String
+  meetingType: String,
+  googleEventId: String, // 🆕 STORE GOOGLE CALENDAR EVENT ID
+  hangoutLink: String    // 🆕 STORE GOOGLE MEET LINK
 }, { timestamps: true });
 
 const ResourceSchema = new mongoose.Schema({
@@ -131,9 +134,100 @@ const generateMeetingId = () => {
   return `conclave-${timestamp}-${random}`;
 };
 
-// 🆕 CREATE REAL MEETING LINKS THAT WORK
-const generateWorkingMeetingLink = (meetingId, userName = '') => {
-  return `https://meet.jit.si/${meetingId}`;
+// 🆕 GOOGLE CALENDAR API CONFIGURATION
+let googleCalendarClient = null;
+
+const initializeGoogleCalendar = () => {
+  try {
+    // 🆕 METHOD 1: Service Account (Recommended for backend)
+    const serviceAccount = {
+      "type": "service_account",
+      "project_id": process.env.GOOGLE_PROJECT_ID,
+      "private_key_id": process.env.GOOGLE_PRIVATE_KEY_ID,
+      "private_key": process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      "client_email": process.env.GOOGLE_CLIENT_EMAIL,
+      "client_id": process.env.GOOGLE_CLIENT_ID,
+      "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+      "token_uri": "https://oauth2.googleapis.com/token",
+      "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs"
+    };
+
+    if (serviceAccount.private_key) {
+      const auth = new google.auth.GoogleAuth({
+        credentials: serviceAccount,
+        scopes: ['https://www.googleapis.com/auth/calendar']
+      });
+
+      googleCalendarClient = google.calendar({ version: 'v3', auth });
+      console.log('✅ Google Calendar API initialized successfully');
+    } else {
+      console.log('ℹ️ Google Calendar credentials not found, using simple Google Meet links');
+    }
+  } catch (error) {
+    console.log('⚠️ Google Calendar initialization failed, using simple Google Meet links:', error.message);
+  }
+};
+
+// Initialize Google Calendar on startup
+initializeGoogleCalendar();
+
+// 🆕 ENHANCED GOOGLE MEET LINK GENERATION
+const generateGoogleMeetLink = async (meetingTitle, description = '', startTime = null, durationMinutes = 60) => {
+  try {
+    // If Google Calendar client is available, create a calendar event with Meet
+    if (googleCalendarClient) {
+      const startDateTime = startTime || new Date();
+      const endDateTime = new Date(startDateTime.getTime() + durationMinutes * 60 * 1000);
+
+      const event = {
+        summary: meetingTitle,
+        description: description || 'Meeting created via Travel Tour Academy',
+        start: {
+          dateTime: startDateTime.toISOString(),
+          timeZone: 'UTC',
+        },
+        end: {
+          dateTime: endDateTime.toISOString(),
+          timeZone: 'UTC',
+        },
+        conferenceData: {
+          createRequest: {
+            requestId: `meet-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            conferenceSolutionKey: { type: 'hangoutsMeet' }
+          }
+        }
+      };
+
+      console.log('🎯 Creating Google Calendar event with Meet...');
+      const response = await googleCalendarClient.events.insert({
+        calendarId: 'primary',
+        resource: event,
+        conferenceDataVersion: 1
+      });
+
+      console.log('✅ Google Calendar event created:', response.data.id);
+      return {
+        meetingLink: response.data.hangoutLink,
+        eventId: response.data.id,
+        htmlLink: response.data.htmlLink
+      };
+    }
+  } catch (error) {
+    console.error('❌ Google Calendar API error:', error.message);
+  }
+
+  // 🆕 FALLBACK: Simple Google Meet direct link
+  console.log('🔄 Using fallback Google Meet link');
+  return {
+    meetingLink: 'https://meet.google.com/new',
+    eventId: null,
+    htmlLink: null
+  };
+};
+
+// 🆕 SIMPLE GOOGLE MEET LINK (BACKUP)
+const generateSimpleMeetLink = () => {
+  return 'https://meet.google.com/new';
 };
 
 // 🆕 PREVENT AUTO-DELETION - KEEP RESOURCES PERMANENTLY
@@ -141,21 +235,13 @@ const cleanupOldResources = async () => {
   try {
     console.log('🔄 Checking for old resources to cleanup...');
     
-    // Only delete resources that are explicitly marked for deletion
-    // Don't auto-delete based on time - keep everything permanent
     const deletionCount = await Resource.countDocuments({ 
       isActive: false,
-      // Only delete if explicitly marked inactive for more than 30 days
       updatedAt: { $lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
     });
     
     if (deletionCount > 0) {
       console.log(`🗑️ Found ${deletionCount} old inactive resources to delete`);
-      // Uncomment below if you want to actually delete old inactive resources
-      // await Resource.deleteMany({ 
-      //   isActive: false,
-      //   updatedAt: { $lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-      // });
     } else {
       console.log('✅ No old resources to cleanup - keeping all resources permanent');
     }
@@ -180,7 +266,8 @@ router.get('/health', async (req, res) => {
       timestamp: new Date().toISOString(),
       activeMeetings: activeCount,
       totalMeetings: totalMeetings,
-      totalResources: totalResources
+      totalResources: totalResources,
+      googleCalendar: !!googleCalendarClient
     });
   } catch (error) {
     res.json({ 
@@ -205,12 +292,12 @@ const syncActiveMeetings = async () => {
 // Initialize active meetings on startup
 syncActiveMeetings();
 
-// Create a new meeting
+// 🆕 CREATE GOOGLE MEET MEETING
 router.post('/create', async (req, res) => {
   try {
     const { adminId, title, description = '', adminName = '' } = req.body;
     
-    console.log('🎯 Creating REAL meeting:', { adminId, title, description, adminName });
+    console.log('🎯 Creating Google Meet meeting:', { adminId, title, description, adminName });
 
     if (!adminId || !title) {
       return res.status(400).json({
@@ -228,9 +315,22 @@ router.post('/create', async (req, res) => {
       }
     );
 
-    // 🆕 GENERATE REAL WORKING MEETING
+    // 🆕 GENERATE MEETING ID
     const meetingId = generateMeetingId();
-    const meetingLink = generateWorkingMeetingLink(meetingId, adminName);
+
+    // 🆕 CREATE GOOGLE MEET LINK
+    let meetResult;
+    try {
+      meetResult = await generateGoogleMeetLink(title, description);
+      console.log('✅ Google Meet link generated:', meetResult.meetingLink);
+    } catch (meetError) {
+      console.error('❌ Google Meet generation failed, using fallback:', meetError);
+      meetResult = {
+        meetingLink: generateSimpleMeetLink(),
+        eventId: null,
+        htmlLink: null
+      };
+    }
 
     // 🆕 CREATE NEW MEETING IN DATABASE
     const newMeeting = new Meeting({
@@ -239,7 +339,7 @@ router.post('/create', async (req, res) => {
       adminName: adminName || 'Host',
       title,
       description,
-      meetingLink: meetingLink,
+      meetingLink: meetResult.meetingLink,
       meetingCode: meetingId,
       startTime: new Date(),
       endTime: null,
@@ -248,7 +348,9 @@ router.post('/create', async (req, res) => {
       createdAt: new Date(),
       extensions: 0,
       maxExtensions: 2,
-      meetingType: 'jitsi'
+      meetingType: 'google-meet', // 🆕 CHANGED FROM 'jitsi'
+      googleEventId: meetResult.eventId, // 🆕 STORE GOOGLE EVENT ID
+      hangoutLink: meetResult.meetingLink // 🆕 STORE MEET LINK
     });
 
     await newMeeting.save();
@@ -256,21 +358,21 @@ router.post('/create', async (req, res) => {
     // 🆕 UPDATE ACTIVE MEETINGS CACHE
     await syncActiveMeetings();
     
-    console.log('✅ REAL Meeting created successfully:', newMeeting.id);
-    console.log('🔗 Working Meeting Link:', meetingLink);
+    console.log('✅ Google Meet meeting created successfully:', newMeeting.id);
+    console.log('🔗 Google Meet Link:', meetResult.meetingLink);
     console.log('👤 Admin Name:', adminName);
 
     res.json({
       success: true,
       meeting: newMeeting,
-      message: 'Real meeting created successfully - users can join directly!'
+      message: 'Google Meet session created successfully! Share the link with participants.'
     });
 
   } catch (error) {
-    console.error('❌ Error creating meeting:', error);
+    console.error('❌ Error creating Google Meet:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to create meeting',
+      error: 'Failed to create Google Meet session',
       details: error.message
     });
   }
@@ -982,13 +1084,13 @@ router.delete('/resources/:resourceId', async (req, res) => {
   }
 });
 
-// Join meeting
+// 🆕 UPDATED JOIN MEETING - OPEN IN NEW TAB
 router.post('/:meetingId/join', async (req, res) => {
   try {
     const { meetingId } = req.params;
-    const { userId, userName } = req.body;
+    const { userId, userName, action = 'join' } = req.body; // 🆕 ADD ACTION PARAMETER
     
-    console.log('🎯 User joining REAL meeting:', { meetingId, userId, userName });
+    console.log('🎯 User joining Google Meet (new tab):', { meetingId, userId, userName, action });
 
     // 🆕 GET MEETING FROM DATABASE
     const meeting = await Meeting.findOne({ id: meetingId, isActive: true });
@@ -1006,13 +1108,15 @@ router.post('/:meetingId/join', async (req, res) => {
     if (existingParticipantIndex !== -1) {
       meeting.participants[existingParticipantIndex].userName = userName;
       meeting.participants[existingParticipantIndex].lastJoined = new Date();
-      console.log('✅ User updated in meeting:', userName);
+      meeting.participants[existingParticipantIndex].action = action; // 🆕 TRACK ACTION
+      console.log('✅ User rejoined meeting:', userName);
     } else {
       meeting.participants.push({
         userId,
         userName,
         joinedAt: new Date(),
-        lastJoined: new Date()
+        lastJoined: new Date(),
+        action: action // 🆕 TRACK ACTION
       });
       console.log('✅ New user joined meeting:', userName);
     }
@@ -1027,7 +1131,7 @@ router.post('/:meetingId/join', async (req, res) => {
       success: true,
       meeting: meeting,
       joinLink: meeting.meetingLink,
-      message: 'Ready to join real meeting',
+      message: 'Google Meet ready to open in new tab',
       isNewParticipant: existingParticipantIndex === -1
     });
 
