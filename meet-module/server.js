@@ -1,5 +1,3 @@
-// travel-tour-backend/meet-module/server.js
-
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -68,12 +66,19 @@ if (!fs.existsSync(uploadsDir)) {
   console.log('📁 Created uploads directory:', uploadsDir);
 }
 
-// 🆕 USE THE SINGLE API GATEWAY INSTEAD OF SEPARATE ROUTES
-console.log('🔄 Loading Meet Module API Gateway...');
-const { router: meetApiGateway } = require('./apiGateway');
-app.use('/api/meet', meetApiGateway);
+// 🆕 IMPORT THE NEW MEET ROUTES
+console.log('🔄 Loading Enhanced Meet Routes...');
+const meetRoutes = require('./routes/meet-routes');
+app.use('/api/meet', meetRoutes);
 
-console.log('✅ Meet Module API Gateway mounted at /api/meet');
+console.log('✅ Enhanced Meet Routes mounted at /api/meet');
+
+// 🆕 ALSO KEEP THE EXISTING API GATEWAY FOR BACKWARD COMPATIBILITY
+console.log('🔄 Loading Legacy Meet Module API Gateway...');
+const { router: meetApiGateway } = require('./apiGateway');
+app.use('/api/meet-legacy', meetApiGateway);
+
+console.log('✅ Legacy Meet Module API Gateway mounted at /api/meet-legacy');
 
 // Enhanced Health check with detailed info
 app.get('/health', async (req, res) => {
@@ -102,11 +107,17 @@ app.get('/health', async (req, res) => {
       },
       uploads: uploadsInfo,
       endpoints: {
-        base: '/api/meet',
-        health: '/api/meet/health',
+        enhanced: '/api/meet/* (Seamless Join)',
+        legacy: '/api/meet-legacy/* (Backward Compatible)',
+        health: '/health',
         meetings: '/api/meet/create, /api/meet/active, etc.',
         resources: '/api/meet/resources/share, /api/meet/resources/meeting/:id',
         files: '/api/meet/uploads/:filename'
+      },
+      features: {
+        seamlessJoin: true,
+        googleCalendarIntegration: true,
+        instantMeetingCreation: true
       }
     });
   } catch (error) {
@@ -123,11 +134,19 @@ app.get('/', (req, res) => {
   res.json({
     success: true,
     message: '🚀 Travel Tour Academy - Meet Module API',
-    version: '1.0.0',
-    description: 'Real-time meeting and resource sharing module',
+    version: '2.0.0',
+    description: 'Enhanced real-time meeting and resource sharing module with seamless Google Meet integration',
+    features: [
+      'Seamless Google Meet joining',
+      'Instant meeting creation',
+      'Resource sharing with permanent storage',
+      'Google Calendar API integration',
+      'Real-time participant tracking'
+    ],
     endpoints: {
       health: '/health',
-      api: '/api/meet',
+      enhancedApi: '/api/meet (Seamless Join)',
+      legacyApi: '/api/meet-legacy (Backward Compatible)',
       documentation: 'See /health for detailed endpoint information'
     },
     timestamp: new Date().toISOString()
@@ -172,7 +191,8 @@ app.use('*', (req, res) => {
     availableEndpoints: {
       root: 'GET /',
       health: 'GET /health',
-      meetApi: 'GET /api/meet/*'
+      enhancedApi: 'GET /api/meet/* (Seamless Join)',
+      legacyApi: 'GET /api/meet-legacy/* (Backward Compatible)'
     }
   });
 });
@@ -199,19 +219,21 @@ const HOST = process.env.HOST || '0.0.0.0';
 connectDB().then(() => {
   app.listen(PORT, HOST, () => {
     console.log('='.repeat(60));
-    console.log('🚀 TRAVEL TOUR ACADEMY - MEET MODULE');
+    console.log('🚀 TRAVEL TOUR ACADEMY - ENHANCED MEET MODULE');
     console.log('='.repeat(60));
     console.log(`📍 Server running on: http://${HOST}:${PORT}`);
     console.log(`🔗 Health Check: http://${HOST}:${PORT}/health`);
-    console.log(`🎯 API Gateway: http://${HOST}:${PORT}/api/meet`);
+    console.log(`🎯 Enhanced API: http://${HOST}:${PORT}/api/meet`);
+    console.log(`🔁 Legacy API: http://${HOST}:${PORT}/api/meet-legacy`);
     console.log(`📁 Uploads Directory: ${uploadsDir}`);
     console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`⏰ Server Time: ${new Date().toLocaleString()}`);
     console.log('='.repeat(60));
-    console.log('✅ Meet Module is ready to handle requests!');
+    console.log('✅ Enhanced Meet Module is ready to handle requests!');
+    console.log('✅ Seamless Google Meet integration enabled!');
     console.log('='.repeat(60));
   });
 }).catch(err => {
-  console.error('❌ Failed to start Meet Module:', err);
+  console.error('❌ Failed to start Enhanced Meet Module:', err);
   process.exit(1);
 });
