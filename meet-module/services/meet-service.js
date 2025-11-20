@@ -37,8 +37,9 @@ class MeetService {
   // 🆕 CREATE REAL GOOGLE MEET USING CALENDAR API
   async createMeeting(adminId, title, description, adminName) {
     try {
+      // 🆕 CRITICAL: If Google API fails, THROW ERROR instead of creating fake links
       if (!this.initialized) {
-        throw new Error('Google API not initialized');
+        throw new Error('Google Calendar API not available. Cannot create real Google Meet.');
       }
 
       console.log('🎯 Creating REAL Google Meet via Calendar API...');
@@ -89,8 +90,9 @@ class MeetService {
         conferenceData: response.data.conferenceData
       });
 
+      // 🆕 CRITICAL: VERIFY WE GOT A REAL MEET LINK
       if (!response.data.hangoutLink) {
-        console.error('❌ No hangoutLink in response:', response.data);
+        console.error('❌ NO REAL MEET LINK GENERATED:', response.data);
         throw new Error('Google Meet link was not generated. Please check Google Calendar API permissions.');
       }
 
@@ -146,7 +148,7 @@ class MeetService {
         instantJoinLink: response.data.hangoutLink,
         meetingCode: meetingCode,
         googleEventId: response.data.id,
-        message: 'Real Google Meet created successfully'
+        message: 'Live stream created successfully'
       };
 
     } catch (error) {
@@ -158,12 +160,14 @@ class MeetService {
         errorMessage = 'Google Calendar API permission denied. Please check service account permissions and enable Google Calendar API.';
       } else if (error.code === 401) {
         errorMessage = 'Google API authentication failed. Please check service account credentials.';
+      } else if (error.message.includes('Google Calendar API not available')) {
+        errorMessage = 'Google Calendar API is not configured. Please check your Google API settings.';
       }
       
       return { 
         success: false, 
         error: errorMessage,
-        details: 'Failed to create real Google Meet via Calendar API',
+        details: 'Failed to create live stream',
         code: error.code
       };
     }
@@ -331,7 +335,7 @@ class MeetService {
       return {
         success: true,
         joinLinks: joinLinks,
-        message: 'Real Google Meet join links generated successfully'
+        message: 'Join links generated successfully'
       };
 
     } catch (error) {

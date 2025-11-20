@@ -1,3 +1,5 @@
+//travel-tour-backend/meet-module/models/Meeting.js
+
 const mongoose = require('mongoose');
 
 const meetingSchema = new mongoose.Schema({
