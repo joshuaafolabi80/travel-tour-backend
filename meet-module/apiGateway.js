@@ -7,6 +7,9 @@ const fs = require('fs');
 const { google } = require('googleapis'); // 🆕 ADD GOOGLE APIs
 const router = express.Router();
 
+// 🆕 IMPORT RESOURCE GUARDIAN
+const ResourceGuardian = require('./scripts/resourceGuardian');
+
 // 🆕 CREATE UPLOADS DIRECTORY IF IT DOESN'T EXIST
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
@@ -118,7 +121,14 @@ const ResourceSchema = new mongoose.Schema({
     timestamp: Date
   }],
   createdAt: Date,
-  isActive: { type: Boolean, default: true }
+  isActive: { type: Boolean, default: true },
+  // 🆕 ADD PROTECTION FIELDS
+  deactivatedAt: Date,
+  deletedByAdmin: String,
+  deletionMethod: String,
+  guardianReactivatedAt: Date,
+  recoveredAt: Date,
+  recoveredByAdmin: String
 }, { timestamps: true });
 
 // 🆕 MONGOOSE MODELS
@@ -259,7 +269,7 @@ router.get('/health', async (req, res) => {
   try {
     const activeCount = await Meeting.countDocuments({ isActive: true });
     const totalMeetings = await Meeting.countDocuments();
-    const totalResources = await Resource.countDocuments();
+    const totalResources = await Resource.countDocuments({ isActive: true });
     
     res.json({ 
       success: true, 
@@ -268,7 +278,8 @@ router.get('/health', async (req, res) => {
       activeMeetings: activeCount,
       totalMeetings: totalMeetings,
       totalResources: totalResources,
-      googleCalendar: !!googleCalendarClient
+      googleCalendar: !!googleCalendarClient,
+      resourceProtection: 'ACTIVE'
     });
   } catch (error) {
     res.json({ 
@@ -1016,12 +1027,20 @@ router.post('/resources/:resourceId/access', async (req, res) => {
   }
 });
 
-// 🆕 ADDED: DELETE RESOURCE ENDPOINT - HARD DELETE (ACTUALLY REMOVES FROM DATABASE)
+// 🆕 ADDED: DELETE RESOURCE ENDPOINT - GUARDED DELETE (REQUIRES ADMIN ID)
 router.delete('/resources/:resourceId', async (req, res) => {
   try {
     const { resourceId } = req.params;
+    const { adminId } = req.body; // 🆕 REQUIRE ADMIN ID FOR DELETION
     
-    console.log('💀 HARD DELETING resource from database:', resourceId);
+    if (!adminId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Admin ID required for deletion'
+      });
+    }
+    
+    console.log('💀 GUARDED DELETING resource from database:', resourceId, 'by admin:', adminId);
     console.log('🔍 Searching for resource with ID:', resourceId);
     
     // Find the resource first to return info about what was deleted
@@ -1042,42 +1061,66 @@ router.delete('/resources/:resourceId', async (req, res) => {
     
     console.log('✅ Found resource to delete:', resource.title, 'ID:', resource.id);
     
-    // 🆕 DELETE ACTUAL FILE FROM SERVER IF IT EXISTS
-    if (resource.fileUrl) {
-      const filename = resource.fileUrl.split('/').pop();
-      const filePath = path.join(uploadsDir, filename);
+    // 🆕 USE RESOURCE GUARDIAN FOR SAFE DELETION
+    const result = await ResourceGuardian.manualAdminDelete(resourceId, adminId);
+    
+    if (result.success) {
+      console.log('✅ Resource PERMANENTLY DELETED from database:', resource.title, resourceId);
       
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        console.log('🗑️ Deleted file from server:', filePath);
-      }
-    }
-    
-    // 🆕 ACTUAL HARD DELETE - COMPLETELY REMOVE FROM DATABASE
-    console.log('🗑️ Executing MongoDB deleteOne operation...');
-    const deleteResult = await Resource.deleteOne({ id: resourceId });
-    
-    console.log('✅ Resource PERMANENTLY DELETED from database:', resource.title, resourceId);
-    console.log('🗑️ MongoDB delete result:', deleteResult);
-    
-    // Verify the resource is actually gone
-    const verifyResource = await Resource.findOne({ id: resourceId });
-    if (verifyResource) {
-      console.log('❌ WARNING: Resource still exists after deletion!');
+      res.json({
+        success: true,
+        message: 'Resource PERMANENTLY deleted from database',
+        deletedResource: resource
+      });
     } else {
-      console.log('✅ CONFIRMED: Resource successfully removed from database');
+      console.error('❌ Resource Guardian deletion failed:', result.error);
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
     }
-    
-    res.json({
-      success: true,
-      message: 'Resource PERMANENTLY deleted from database',
-      deletedResource: resource,
-      deleteCount: deleteResult.deletedCount,
-      verified: !verifyResource
-    });
     
   } catch (error) {
     console.error('❌ Error deleting resource:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// 🆕 ADDED: RECOVER RESOURCE ENDPOINT
+router.put('/resources/:resourceId/recover', async (req, res) => {
+  try {
+    const { resourceId } = req.params;
+    const { adminId } = req.body;
+    
+    if (!adminId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Admin ID required for recovery'
+      });
+    }
+    
+    console.log('🔄 ADMIN RECOVERY REQUEST:', resourceId, 'by admin:', adminId);
+    
+    const result = await ResourceGuardian.recoverResource(resourceId, adminId);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Resource recovered successfully',
+        recovered: true
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error recovering resource:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
