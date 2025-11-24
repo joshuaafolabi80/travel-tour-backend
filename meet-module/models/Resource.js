@@ -52,13 +52,12 @@ const resourceSchema = new mongoose.Schema({
     type: String
   },
   sharedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+    type: String, // 🆕 CHANGED FROM ObjectId TO String FOR FLEXIBILITY
+    default: 'unknown'
   },
   sharedByName: {
     type: String,
-    required: true
+    default: 'Unknown User'
   },
   sharedAt: {
     type: Date,
@@ -66,8 +65,8 @@ const resourceSchema = new mongoose.Schema({
   },
   accessedBy: [{
     userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
+      type: String, // 🆕 CHANGED FROM ObjectId TO String
+      default: 'unknown'
     },
     accessedAt: {
       type: Date,
@@ -107,7 +106,43 @@ const resourceSchema = new mongoose.Schema({
     type: String,
     enum: ['uploading', 'completed', 'error'],
     default: 'completed'
-  }
+  },
+  
+  // 🆕 COMPATIBILITY FIELDS FOR FRONTEND-BACKEND ALIGNMENT
+  id: { 
+    type: String, 
+    default: function() { return this.resourceId; } 
+  },
+  fileUrl: {
+    type: String
+  },
+  uploadedBy: { 
+    type: String, 
+    default: function() { return this.sharedBy; } 
+  },
+  uploadedByName: { 
+    type: String, 
+    default: function() { return this.sharedByName; } 
+  },
+  resourceType: { 
+    type: String, 
+    default: function() { return this.type; } 
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  
+  // 🛡️ PROTECTION FIELDS
+  deactivatedAt: Date,
+  deletedByAdmin: String,
+  deletionMethod: String,
+  guardianReactivatedAt: Date,
+  recoveredAt: Date,
+  recoveredByAdmin: String
+}, { 
+  timestamps: true,
+  collection: 'resources'
 });
 
 // Indexes for faster queries
@@ -115,5 +150,6 @@ resourceSchema.index({ meetingId: 1 });
 resourceSchema.index({ resourceId: 1 });
 resourceSchema.index({ sharedBy: 1 });
 resourceSchema.index({ sharedAt: -1 });
+resourceSchema.index({ isActive: 1 }); // 🆕 ADDED FOR BETTER QUERIES
 
 module.exports = mongoose.model('Resource', resourceSchema);

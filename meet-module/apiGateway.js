@@ -83,6 +83,7 @@ const MeetingSchema = new mongoose.Schema({
   startTime: Date,
   endTime: Date,
   isActive: Boolean,
+  status: String, // 🆕 ADD STATUS FIELD
   participants: [{
     userId: String,
     userName: String,
@@ -323,6 +324,7 @@ router.post('/create', async (req, res) => {
       startTime: new Date(),
       endTime: null,
       isActive: true,
+      status: 'created', // 🆕 INITIAL STATUS
       participants: [],
       createdAt: new Date(),
       extensions: 0,
@@ -353,6 +355,42 @@ router.post('/create', async (req, res) => {
       success: false,
       error: 'Failed to create Google Meet session',
       details: error.message
+    });
+  }
+});
+
+// 🆕 ADD MEETING STATUS UPDATE ENDPOINT
+router.put('/:meetingId/status', async (req, res) => {
+  try {
+    const { meetingId } = req.params;
+    const { status } = req.body;
+
+    console.log('🔄 Updating meeting status:', { meetingId, status });
+
+    const meeting = await Meeting.findOne({ id: meetingId });
+    if (!meeting) {
+      return res.status(404).json({
+        success: false,
+        error: 'Meeting not found'
+      });
+    }
+
+    meeting.status = status;
+    await meeting.save();
+
+    console.log('✅ Meeting status updated:', meetingId, status);
+
+    res.json({
+      success: true,
+      message: 'Meeting status updated successfully',
+      meeting: meeting
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating meeting status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update meeting status'
     });
   }
 });
