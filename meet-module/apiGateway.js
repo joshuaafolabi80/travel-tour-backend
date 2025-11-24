@@ -97,43 +97,10 @@ const MeetingSchema = new mongoose.Schema({
   hangoutLink: String    // 🆕 STORE GOOGLE MEET LINK
 }, { timestamps: true });
 
-const ResourceSchema = new mongoose.Schema({
-  id: String,
-  meetingId: String,
-  resourceType: {
-    type: String,
-    enum: ['document', 'link', 'image', 'text', 'pdf'],
-    required: true
-  },
-  title: String,
-  content: String,
-  fileName: String,
-  fileUrl: String,
-  fileSize: Number,
-  mimeType: String,
-  uploadedBy: String,
-  uploadedByName: String,
-  accessedBy: [{
-    userId: String,
-    userName: String,
-    device: String,
-    action: String,
-    timestamp: Date
-  }],
-  createdAt: Date,
-  isActive: { type: Boolean, default: true },
-  // 🆕 ADD PROTECTION FIELDS
-  deactivatedAt: Date,
-  deletedByAdmin: String,
-  deletionMethod: String,
-  guardianReactivatedAt: Date,
-  recoveredAt: Date,
-  recoveredByAdmin: String
-}, { timestamps: true });
-
 // 🆕 MONGOOSE MODELS
+const Resource = require('./models/Resource');
 const Meeting = mongoose.model('Meeting', MeetingSchema);
-const Resource = mongoose.model('Resource', ResourceSchema);
+
 
 // In-memory storage for active meetings (for quick access)
 let activeMeetings = [];
