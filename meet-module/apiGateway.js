@@ -667,13 +667,15 @@ router.get('/file-content/:filename', (req, res) => {
   }
 });
 
-// 🆕 ENHANCED SHARE RESOURCE WITH ACTUAL FILE UPLOAD
+// 🆕 FIXED SHARE RESOURCE WITH ACTUAL FILE UPLOAD
 router.post('/resources/share', upload.single('file'), async (req, res) => {
   try {
     // Parse form data fields
     const resourceData = {
       meetingId: req.body.meetingId,
-      resourceType: req.body.resourceType,
+      // 🆕 MAP resourceType TO type FOR BACKWARD COMPATIBILITY
+      type: req.body.resourceType || req.body.type,
+      resourceType: req.body.resourceType, // Keep both for compatibility
       title: req.body.title,
       content: req.body.content,
       fileName: req.body.fileName,
@@ -694,14 +696,14 @@ router.post('/resources/share', upload.single('file'), async (req, res) => {
       } : 'No file'
     });
 
-    if (!resourceData.meetingId || !resourceData.resourceType) {
+    if (!resourceData.meetingId || !resourceData.type) {
       // If file was uploaded but validation fails, delete the file
       if (file) {
         fs.unlinkSync(file.path);
       }
       return res.status(400).json({
         success: false,
-        error: 'meetingId and resourceType are required'
+        error: 'meetingId and type are required'
       });
     }
 
@@ -720,7 +722,7 @@ router.post('/resources/share', upload.single('file'), async (req, res) => {
 
     // 🆕 VALIDATE RESOURCE TYPE (EXCLUDE VIDEOS)
     const allowedTypes = ['document', 'link', 'image', 'text', 'pdf'];
-    if (!allowedTypes.includes(resourceData.resourceType)) {
+    if (!allowedTypes.includes(resourceData.type)) {
       if (file) {
         fs.unlinkSync(file.path);
       }
@@ -745,38 +747,42 @@ router.post('/resources/share', upload.single('file'), async (req, res) => {
       content = `File: ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
       
       // Auto-detect resource type from file mimetype
-      if (resourceData.resourceType === 'document') {
+      if (resourceData.type === 'document') {
         if (file.mimetype === 'application/pdf') {
-          resourceData.resourceType = 'pdf';
+          resourceData.type = 'pdf';
         } else if (file.mimetype.startsWith('image/')) {
-          resourceData.resourceType = 'image';
+          resourceData.type = 'image';
         } else if (file.mimetype.startsWith('text/')) {
-          resourceData.resourceType = 'text';
+          resourceData.type = 'text';
         }
       }
     }
 
+    // 🆕 GENERATE RESOURCE ID IF NOT PROVIDED
+    const resourceId = `resource_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
     // 🆕 CREATE RESOURCE IN DATABASE
     const newResource = new Resource({
-      id: `resource_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      resourceId: resourceId, // 🆕 ADD REQUIRED resourceId FIELD
+      id: resourceId, // 🆕 ALSO SET id FIELD FOR COMPATIBILITY
       meetingId: resourceData.meetingId,
-      resourceType: resourceData.resourceType,
+      type: resourceData.type, // 🆕 USE type FIELD (REQUIRED BY SCHEMA)
       title: resourceData.title || fileName || 'Shared Resource',
       content: content,
       fileName: fileName,
       fileUrl: fileUrl,
       fileSize: fileSize,
       mimeType: mimeType,
-      uploadedBy: resourceData.uploadedBy,
-      uploadedByName: resourceData.uploadedByName,
+      sharedBy: resourceData.uploadedBy, // 🆕 MAP uploadedBy TO sharedBy
+      sharedByName: resourceData.uploadedByName, // 🆕 MAP uploadedByName TO sharedByName
       accessedBy: [],
-      createdAt: resourceData.createdAt ? new Date(resourceData.createdAt) : new Date(),
+      sharedAt: resourceData.createdAt ? new Date(resourceData.createdAt) : new Date(),
       isActive: true
     });
 
     await newResource.save();
     
-    console.log('✅ Resource shared and saved to database:', newResource.id);
+    console.log('✅ Resource shared and saved to database:', newResource.resourceId);
     console.log('📁 File details:', {
       fileName: fileName,
       fileUrl: fileUrl,
@@ -836,20 +842,25 @@ router.post('/resources/share-json', async (req, res) => {
       });
     }
 
+    // 🆕 GENERATE RESOURCE ID
+    const resourceId = `resource_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
     // 🆕 CREATE RESOURCE IN DATABASE
     const newResource = new Resource({
-      id: `resource_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      resourceId: resourceId,
+      id: resourceId,
       meetingId: resourceData.meetingId,
+      type: resourceData.resourceType, // Map resourceType to type
       resourceType: resourceData.resourceType,
       title: resourceData.title || 'Shared Resource',
       content: resourceData.content,
       fileName: resourceData.fileName,
       fileUrl: resourceData.fileUrl,
       fileSize: resourceData.fileSize || 0,
-      uploadedBy: resourceData.uploadedBy,
-      uploadedByName: resourceData.uploadedByName,
+      sharedBy: resourceData.uploadedBy,
+      sharedByName: resourceData.uploadedByName,
       accessedBy: [],
-      createdAt: resourceData.createdAt ? new Date(resourceData.createdAt) : new Date(),
+      sharedAt: resourceData.createdAt ? new Date(resourceData.createdAt) : new Date(),
       isActive: true
     });
 
