@@ -41,6 +41,11 @@ const connectDB = async () => {
     console.log('✅ MongoDB Connected Successfully');
     console.log('📁 Database Name:', mongoose.connection.name);
     
+    // 🛡️ ACTIVATE RESOURCE GUARDIAN AFTER DATABASE CONNECTION
+    console.log('🛡️ ACTIVATING RESOURCE DELETION PROTECTION...');
+    require('./scripts/activateGuardian');
+    console.log('🛡️ RESOURCE DELETION PROTECTION: ACTIVATED');
+    
     // Check connection status
     mongoose.connection.on('connected', () => {
       console.log('🎯 Mongoose connected to MongoDB');
@@ -118,7 +123,8 @@ app.get('/health', async (req, res) => {
       features: {
         seamlessJoin: true,
         googleCalendarIntegration: true,
-        instantMeetingCreation: true
+        instantMeetingCreation: true,
+        resourceDeletionProtection: true
       }
     });
   } catch (error) {
@@ -142,7 +148,8 @@ app.get('/', (req, res) => {
       'Instant meeting creation',
       'Resource sharing with permanent storage',
       'Google Calendar API integration',
-      'Real-time participant tracking'
+      'Real-time participant tracking',
+      'Resource deletion protection'
     ],
     endpoints: {
       health: '/health',
@@ -232,6 +239,7 @@ connectDB().then(() => {
     console.log('='.repeat(60));
     console.log('✅ Enhanced Meet Module is ready to handle requests!');
     console.log('✅ Seamless Google Meet integration enabled!');
+    console.log('🛡️ RESOURCE DELETION PROTECTION: ACTIVATED');
     console.log('='.repeat(60));
   });
 }).catch(err => {

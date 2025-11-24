@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const Resource = require('../models/Resource');
+const ResourceGuardian = require('../scripts/resourceGuardian');
 
 // ✅ SHARE RESOURCE
 router.post('/share', async (req, res) => {
@@ -130,43 +131,39 @@ router.get('/:resourceId', async (req, res) => {
   }
 });
 
-// 🆕 ADDED: DELETE RESOURCE
+// 🛡️ GUARDED: DELETE RESOURCE (ONLY MANUAL ADMIN DELETION ALLOWED)
 router.delete('/:resourceId', async (req, res) => {
   try {
     const { resourceId } = req.params;
+    const { adminId } = req.body; // Admin must provide their ID
     
-    console.log(`🗑️ Deleting resource: ${resourceId}`);
-    
-    // Find the resource first
-    const resource = await Resource.findOne({ resourceId });
-    
-    if (!resource) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Resource not found' 
+    if (!adminId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Admin ID required for deletion'
       });
     }
     
-    // Instead of actually deleting, we'll mark it as inactive
-    // This preserves data integrity and allows for recovery if needed
-    await Resource.updateOne(
-      { resourceId },
-      { 
-        isActive: false,
-        deactivatedAt: new Date()
-      }
-    );
+    console.log(`👑 ADMIN DELETE REQUEST: ${resourceId} by admin ${adminId}`);
     
-    console.log(`✅ Resource marked as inactive: ${resource.title} (${resourceId})`);
+    // Use the guarded deletion method
+    const result = await ResourceGuardian.manualAdminDelete(resourceId, adminId);
     
-    res.json({
-      success: true,
-      message: 'Resource deleted successfully',
-      deletedResource: resource
-    });
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Resource deleted successfully (manual admin deletion)',
+        deletedResource: result.resource
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
     
   } catch (error) {
-    console.error('Delete resource error:', error);
+    console.error('Guarded delete error:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -174,12 +171,20 @@ router.delete('/:resourceId', async (req, res) => {
   }
 });
 
-// 🆕 ADDED: HARD DELETE RESOURCE (completely remove from database)
+// 🛡️ GUARDED: HARD DELETE RESOURCE (completely remove from database - ONLY ADMIN)
 router.delete('/:resourceId/hard', async (req, res) => {
   try {
     const { resourceId } = req.params;
+    const { adminId } = req.body; // Admin must provide their ID
     
-    console.log(`💀 Hard deleting resource: ${resourceId}`);
+    if (!adminId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Admin ID required for hard deletion'
+      });
+    }
+    
+    console.log(`💀 ADMIN HARD DELETE REQUEST: ${resourceId} by admin ${adminId}`);
     
     const resource = await Resource.findOne({ resourceId });
     
@@ -190,19 +195,65 @@ router.delete('/:resourceId/hard', async (req, res) => {
       });
     }
     
-    // Actually delete the resource from the database
-    await Resource.deleteOne({ resourceId });
+    // Actually delete the resource from the database (only allowed through guardian)
+    const result = await ResourceGuardian.manualAdminDelete(resourceId, adminId);
     
-    console.log(`✅ Resource permanently deleted: ${resource.title} (${resourceId})`);
-    
-    res.json({
-      success: true,
-      message: 'Resource permanently deleted',
-      deletedResource: resource
-    });
+    if (result.success) {
+      console.log(`✅ Resource permanently deleted: ${resource.title} (${resourceId}) by admin ${adminId}`);
+      
+      res.json({
+        success: true,
+        message: 'Resource permanently deleted (admin hard delete)',
+        deletedResource: resource
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
     
   } catch (error) {
     console.error('Hard delete resource error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// 🛡️ RECOVER RESOURCE (Admin only)
+router.put('/:resourceId/recover', async (req, res) => {
+  try {
+    const { resourceId } = req.params;
+    const { adminId } = req.body;
+    
+    if (!adminId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Admin ID required for recovery'
+      });
+    }
+    
+    console.log(`🔄 ADMIN RECOVERY REQUEST: ${resourceId} by admin ${adminId}`);
+    
+    const result = await ResourceGuardian.recoverResource(resourceId, adminId);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Resource recovered successfully',
+        recovered: true
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+    
+  } catch (error) {
+    console.error('Recover resource error:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message 

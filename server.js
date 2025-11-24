@@ -2689,7 +2689,7 @@ const startServer = async () => {
       console.log(`📍   Get videos: http://localhost:${PORT}/api/videos`);
       console.log(`📍   Validate masterclass video access: http://localhost:${PORT}/api/videos/validate-masterclass-access`);
       console.log(`📍   Upload video (admin): http://localhost:${PORT}/api/admin/upload-video`);
-      console.log(`📍   Get videos (admin): http://localhost:${PORT}/api/admin/videos`);
+      console.log(`📍   Get videos (admin): http://localhost:${Port}/api/admin/videos`);
       console.log(`📍   Update/Delete video (admin): http://localhost:${PORT}/api/admin/videos/:id`);
       console.log(`\n📊 VIDEO COUNT ROUTES - NEWLY ADDED:`);
       console.log(`📍   Get video counts: http://localhost:${PORT}/api/videos/count`);
@@ -2737,6 +2737,7 @@ const startServer = async () => {
       console.log('✅ Real-time messaging');
       console.log('✅ Admin badge showing for admin messages');
       console.log('✅ Message persistence and history');
+      console.log('\n🛡️ RESOURCE DELETION PROTECTION: ACTIVATED');
     });
 
     // Attempt database connection in background
