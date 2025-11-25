@@ -997,6 +997,35 @@ router.get('/resources/meeting/:meetingId', async (req, res) => {
   }
 });
 
+// 🆕 ADD ARCHIVED RESOURCES ENDPOINT
+router.get('/resources/archived', async (req, res) => {
+  try {
+    console.log('🎯 Fetching ALL archived resources...');
+
+    // 🆕 GET ALL RESOURCES REGARDLESS OF MEETING STATUS
+    const resources = await Resource.find({ isActive: true })
+      .sort({ createdAt: -1 })
+      .limit(100); // Limit to prevent overload
+    
+    console.log('✅ Found archived resources:', resources.length);
+
+    res.json({
+      success: true,
+      resources: resources,
+      total: resources.length,
+      message: `Loaded ${resources.length} resources from archive`
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching archived resources:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch archived resources',
+      details: error.message
+    });
+  }
+});
+
 // 🆕 ADDED: RECORD RESOURCE ACCESS
 router.post('/resources/:resourceId/access', async (req, res) => {
   try {
