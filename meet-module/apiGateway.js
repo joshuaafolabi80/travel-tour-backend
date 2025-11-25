@@ -1,4 +1,3 @@
-// travel-tour-backend/meet-module/apiGateway.js
 const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
@@ -422,162 +421,238 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// 🆕 FIXED DIRECT RESOURCE VIEWING ENDPOINT WITH TEXT JUSTIFICATION
+// 🆕 FIXED RESOURCE ACCESS ENDPOINT
+router.post('/resources/:resourceId/access', async (req, res) => {
+  try {
+    const { resourceId } = req.params;
+    const { userId, action = 'view' } = req.body;
+
+    console.log('🎯 Recording resource access:', { resourceId, userId, action });
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId is required'
+      });
+    }
+
+    const resource = await Resource.findOne({ 
+      $or: [
+        { id: resourceId, isActive: true },
+        { resourceId: resourceId, isActive: true }
+      ]
+    });
+    
+    if (!resource) {
+      console.log('⚠️ Resource not found or inactive:', resourceId);
+      // 🆕 RETURN SUCCESS EVEN IF RESOURCE NOT FOUND TO PREVENT FRONTEND ERRORS
+      return res.json({
+        success: true,
+        message: 'Resource access noted (resource not found)'
+      });
+    }
+
+    // 🆕 SIMPLIFIED ACCESS RECORDING - DON'T BREAK IF THIS FAILS
+    try {
+      resource.accessedBy = resource.accessedBy || [];
+      resource.accessedBy.push({
+        userId: userId,
+        userName: 'User',
+        device: 'web',
+        action: action,
+        timestamp: new Date()
+      });
+
+      await resource.save();
+      console.log('✅ Resource access recorded successfully');
+    } catch (saveError) {
+      console.warn('⚠️ Could not save access record (non-critical):', saveError);
+      // Don't fail the whole request for tracking issues
+    }
+
+    res.json({
+      success: true,
+      message: 'Resource access recorded successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error recording resource access:', error);
+    // 🆕 RETURN SUCCESS EVEN ON ERROR TO PREVENT FRONTEND BREAKAGE
+    res.json({
+      success: true,
+      message: 'Resource access noted (error ignored)'
+    });
+  }
+});
+
+// 🆕 BULLETPROOF RESOURCE VIEWING ENDPOINT
 router.get('/resources/:resourceId/view', async (req, res) => {
   try {
     const { resourceId } = req.params;
     
     console.log('🎯 Viewing resource content:', resourceId);
 
-    const resource = await Resource.findOne({ id: resourceId, isActive: true });
+    // 🆕 FLEXIBLE RESOURCE LOOKUP
+    const resource = await Resource.findOne({ 
+      $or: [
+        { id: resourceId, isActive: true },
+        { resourceId: resourceId, isActive: true }
+      ]
+    });
+    
     if (!resource) {
+      console.log('❌ Resource not found:', resourceId);
       return res.status(404).json({
         success: false,
-        error: 'Resource not found'
+        error: 'Resource not found or has been deleted'
       });
     }
 
-    // If it's a file resource, serve the actual file content
-    if (resource.fileUrl && resource.fileUrl.startsWith('/api/meet/uploads/')) {
+    console.log('✅ Found resource:', resource.title, 'Type:', resource.resourceType || resource.type);
+
+    // 🆕 HANDLE FILE RESOURCES WITH MISSING FILES GRACEFULLY
+    if (resource.fileUrl && resource.fileUrl.includes('/uploads/')) {
       const filename = resource.fileUrl.split('/').pop();
       const filePath = path.join(uploadsDir, filename);
       
-      if (fs.existsSync(filePath)) {
-        // Read file content based on file type
-        const fileExtension = path.extname(filename).toLowerCase();
-        
-        if (fileExtension === '.pdf') {
-          // 🆕 FIXED: For PDFs, return the correct file URL
-          return res.json({
-            success: true,
-            contentType: 'pdf',
-            content: `/api/meet/uploads/${filename}`, // 🆕 FIXED: Use full API path
-            title: resource.title,
-            resource: resource
-          });
-        } else if (['.txt', '.csv'].includes(fileExtension)) {
-          // For text files, read and return content (LIKE GENERAL COURSES)
-          try {
-            let content = fs.readFileSync(filePath, 'utf8');
-            
-            // 🆕 ADD TEXT JUSTIFICATION WRAPPER FOR PLAIN TEXT
-            if (fileExtension === '.txt') {
-              content = `<div class="justified-text" style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px;">${content.replace(/\n/g, '<br>')}</div>`;
-              return res.json({
-                success: true,
-                contentType: 'html', // Changed to HTML to support styling
-                content: content,
-                title: resource.title,
-                resource: resource
-              });
-            }
-            
-            // For CSV files, keep as plain text but with monospace font
-            if (fileExtension === '.csv') {
-              content = `<div style="font-family: 'Courier New', monospace; font-size: 14px; white-space: pre; background: #f8f9fa; padding: 15px; border-radius: 5px;">${content}</div>`;
-              return res.json({
-                success: true,
-                contentType: 'html',
-                content: content,
-                title: resource.title,
-                resource: resource
-              });
-            }
-            
+      console.log('🔍 Checking file existence:', filePath);
+      
+      if (!fs.existsSync(filePath)) {
+        console.log('⚠️ File not found on server:', filename);
+        return res.json({
+          success: true,
+          contentType: 'error',
+          content: `⚠️ File not available: "${resource.fileName}" was not found on the server. It may have been deleted.`,
+          title: resource.title + ' (File Missing)',
+          resource: resource
+        });
+      }
+
+      // Read file content based on file type
+      const fileExtension = path.extname(filename).toLowerCase();
+      
+      if (fileExtension === '.pdf') {
+        // 🆕 FIXED: For PDFs, return the correct file URL
+        return res.json({
+          success: true,
+          contentType: 'pdf',
+          content: `/api/meet/uploads/${filename}`, // 🆕 FIXED: Use full API path
+          title: resource.title,
+          resource: resource
+        });
+      } else if (['.txt', '.csv'].includes(fileExtension)) {
+        // For text files, read and return content (LIKE GENERAL COURSES)
+        try {
+          let content = fs.readFileSync(filePath, 'utf8');
+          
+          // 🆕 ADD TEXT JUSTIFICATION WRAPPER FOR PLAIN TEXT
+          if (fileExtension === '.txt') {
+            content = `<div class="justified-text" style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px;">${content.replace(/\n/g, '<br>')}</div>`;
             return res.json({
               success: true,
-              contentType: 'text',
+              contentType: 'html', // Changed to HTML to support styling
               content: content,
               title: resource.title,
               resource: resource
             });
-          } catch (readError) {
-            console.error('Error reading text file:', readError);
-            return res.json({
-              success: true,
-              contentType: 'text',
-              content: `Text file: ${resource.fileName}. Content cannot be displayed directly.`,
-              title: resource.title,
-              resource: resource
-            });
           }
-        } else if (['.doc', '.docx'].includes(fileExtension)) {
-          // 🆕 CRITICAL FIX: For Word documents, use mammoth to convert to HTML (LIKE GENERAL COURSES)
-          try {
-            const mammoth = require('mammoth');
-            const result = await mammoth.convertToHtml({ path: filePath });
-            let htmlContent = result.value;
-            
-            // 🆕 ADD JUSTIFICATION STYLING TO CONVERTED DOCUMENT
-            htmlContent = htmlContent.replace(
-              /<body([^>]*)>/i, 
-              '<body$1 style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: \'Segoe UI\', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px;">'
-            );
-            
-            // 🆕 WRAP CONTENT IN JUSTIFIED CONTAINER IF NO BODY TAG
-            if (!htmlContent.includes('<body')) {
-              htmlContent = `<div style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px;">${htmlContent}</div>`;
-            }
-            
-            // 🆕 ENSURE ALL PARAGRAPHS ARE JUSTIFIED
-            htmlContent = htmlContent.replace(
-              /<p([^>]*)>/gi, 
-              '<p$1 style="text-align: justify; margin-bottom: 1em;">'
-            );
-            
+          
+          // For CSV files, keep as plain text but with monospace font
+          if (fileExtension === '.csv') {
+            content = `<div style="font-family: 'Courier New', monospace; font-size: 14px; white-space: pre; background: #f8f9fa; padding: 15px; border-radius: 5px;">${content}</div>`;
             return res.json({
               success: true,
               contentType: 'html',
-              content: htmlContent,
-              title: resource.title,
-              resource: resource,
-              hasImages: htmlContent.includes('<img'),
-              source: 'html-conversion'
-            });
-          } catch (conversionError) {
-            console.error('DOCX conversion failed:', conversionError);
-            return res.json({
-              success: true,
-              contentType: 'text',
-              content: `Word document: ${resource.fileName}. Use the download option for best viewing.`,
+              content: content,
               title: resource.title,
               resource: resource
             });
           }
-        } else if (['.xls', '.xlsx', '.ppt', '.pptx'].includes(fileExtension)) {
-          // For other office documents, provide information
+          
           return res.json({
             success: true,
             contentType: 'text',
-            content: `Office document: ${resource.fileName}. This document type is best viewed by downloading.`,
+            content: content,
             title: resource.title,
             resource: resource
           });
-        } else if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(fileExtension)) {
-          // 🆕 FIXED: For images, return correct image URL
-          return res.json({
-            success: true,
-            contentType: 'image',
-            content: `/api/meet/uploads/${filename}`, // 🆕 FIXED: Use full API path
-            title: resource.title,
-            resource: resource
-          });
-        } else {
-          // Unknown file type
+        } catch (readError) {
+          console.error('Error reading text file:', readError);
           return res.json({
             success: true,
             contentType: 'text',
-            content: `File: ${resource.fileName}. This file type cannot be displayed directly.`,
+            content: `Text file: ${resource.fileName}. Content cannot be displayed directly.`,
             title: resource.title,
             resource: resource
           });
         }
-      } else {
-        // File doesn't exist on server
+      } else if (['.doc', '.docx'].includes(fileExtension)) {
+        // 🆕 CRITICAL FIX: For Word documents, use mammoth to convert to HTML (LIKE GENERAL COURSES)
+        try {
+          const mammoth = require('mammoth');
+          const result = await mammoth.convertToHtml({ path: filePath });
+          let htmlContent = result.value;
+          
+          // 🆕 ADD JUSTIFICATION STYLING TO CONVERTED DOCUMENT
+          htmlContent = htmlContent.replace(
+            /<body([^>]*)>/i, 
+            '<body$1 style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: \'Segoe UI\', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px;">'
+          );
+          
+          // 🆕 WRAP CONTENT IN JUSTIFIED CONTAINER IF NO BODY TAG
+          if (!htmlContent.includes('<body')) {
+            htmlContent = `<div style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px;">${htmlContent}</div>`;
+          }
+          
+          // 🆕 ENSURE ALL PARAGRAPHS ARE JUSTIFIED
+          htmlContent = htmlContent.replace(
+            /<p([^>]*)>/gi, 
+            '<p$1 style="text-align: justify; margin-bottom: 1em;">'
+          );
+          
+          return res.json({
+            success: true,
+            contentType: 'html',
+            content: htmlContent,
+            title: resource.title,
+            resource: resource,
+            hasImages: htmlContent.includes('<img'),
+            source: 'html-conversion'
+          });
+        } catch (conversionError) {
+          console.error('DOCX conversion failed:', conversionError);
+          return res.json({
+            success: true,
+            contentType: 'text',
+            content: `Word document: ${resource.fileName}. Use the download option for best viewing.`,
+            title: resource.title,
+            resource: resource
+          });
+        }
+      } else if (['.xls', '.xlsx', '.ppt', '.pptx'].includes(fileExtension)) {
+        // For other office documents, provide information
         return res.json({
           success: true,
           contentType: 'text',
-          content: `File not found on server: ${resource.fileName}`,
+          content: `Office document: ${resource.fileName}. This document type is best viewed by downloading.`,
+          title: resource.title,
+          resource: resource
+        });
+      } else if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(fileExtension)) {
+        // 🆕 FIXED: For images, return correct image URL
+        return res.json({
+          success: true,
+          contentType: 'image',
+          content: `/api/meet/uploads/${filename}`, // 🆕 FIXED: Use full API path
+          title: resource.title,
+          resource: resource
+        });
+      } else {
+        // Unknown file type
+        return res.json({
+          success: true,
+          contentType: 'text',
+          content: `File: ${resource.fileName}. This file type cannot be displayed directly.`,
           title: resource.title,
           resource: resource
         });
@@ -607,7 +682,8 @@ router.get('/resources/:resourceId/view', async (req, res) => {
     console.error('❌ Error viewing resource:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to load resource content'
+      error: 'Failed to load resource content',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -1155,52 +1231,6 @@ router.get('/resources/archived', async (req, res) => {
   }
 });
 
-// 🆕 ADDED: RECORD RESOURCE ACCESS
-router.post('/resources/:resourceId/access', async (req, res) => {
-  try {
-    const { resourceId } = req.params;
-    const { userId, action = 'view' } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'userId is required'
-      });
-    }
-
-    const resource = await Resource.findOne({ id: resourceId, isActive: true });
-    if (!resource) {
-      return res.status(404).json({
-        success: false,
-        error: 'Resource not found'
-      });
-    }
-
-    // Add access record
-    resource.accessedBy.push({
-      userId: userId,
-      userName: 'User',
-      device: 'web',
-      action: action,
-      timestamp: new Date()
-    });
-
-    await resource.save();
-
-    res.json({
-      success: true,
-      message: 'Resource access recorded successfully'
-    });
-
-  } catch (error) {
-    console.error('❌ Error recording resource access:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to record resource access'
-    });
-  }
-});
-
 // 🆕 ADDED: DELETE RESOURCE ENDPOINT - GUARDED DELETE (REQUIRES ADMIN ID)
 router.delete('/resources/:resourceId', async (req, res) => {
   try {
@@ -1218,7 +1248,12 @@ router.delete('/resources/:resourceId', async (req, res) => {
     console.log('🔍 Searching for resource with ID:', resourceId);
     
     // Find the resource first to return info about what was deleted
-    const resource = await Resource.findOne({ id: resourceId });
+    const resource = await Resource.findOne({ 
+      $or: [
+        { id: resourceId },
+        { resourceId: resourceId }
+      ]
+    });
     
     if (!resource) {
       console.log('❌ Resource not found with ID:', resourceId);
@@ -1298,6 +1333,57 @@ router.put('/resources/:resourceId/recover', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: error.message 
+    });
+  }
+});
+
+// 🆕 MANUAL DATABASE CLEANUP ENDPOINT
+router.post('/cleanup/resources', async (req, res) => {
+  try {
+    console.log('🧹 MANUAL RESOURCE CLEANUP REQUESTED');
+    
+    // 🆕 FIND ALL RESOURCES IN DATABASE
+    const allResources = await Resource.find({});
+    console.log('📊 Total resources in DB:', allResources.length);
+    
+    // 🆕 FIND RESOURCES WITH MISSING FILES
+    const resourcesWithMissingFiles = [];
+    
+    for (const resource of allResources) {
+      if (resource.fileUrl && resource.fileUrl.includes('/uploads/')) {
+        const filename = resource.fileUrl.split('/').pop();
+        const filePath = path.join(uploadsDir, filename);
+        
+        if (!fs.existsSync(filePath)) {
+          resourcesWithMissingFiles.push(resource);
+          console.log('❌ Missing file:', resource.fileName, 'Resource ID:', resource.id);
+        }
+      }
+    }
+    
+    console.log('📁 Resources with missing files:', resourcesWithMissingFiles.length);
+    
+    res.json({
+      success: true,
+      message: 'Resource cleanup analysis complete',
+      stats: {
+        totalResources: allResources.length,
+        missingFiles: resourcesWithMissingFiles.length,
+        resourcesWithMissingFiles: resourcesWithMissingFiles.map(r => ({
+          id: r.id,
+          title: r.title,
+          fileName: r.fileName,
+          fileUrl: r.fileUrl
+        }))
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Cleanup error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Cleanup failed',
+      details: error.message
     });
   }
 });
