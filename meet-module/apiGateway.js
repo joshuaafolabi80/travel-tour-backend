@@ -421,7 +421,7 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// 🆕 FIXED RESOURCE ACCESS ENDPOINT
+// 🆕 ENHANCED RESOURCE ACCESS ENDPOINT WITH BETTER DEBUGGING
 router.post('/resources/:resourceId/access', async (req, res) => {
   try {
     const { resourceId } = req.params;
@@ -436,23 +436,36 @@ router.post('/resources/:resourceId/access', async (req, res) => {
       });
     }
 
-    const resource = await Resource.findOne({ 
+    // 🆕 FLEXIBLE RESOURCE LOOKUP
+    const resource = await Resource.findOne({
       $or: [
-        { id: resourceId, isActive: true },
-        { resourceId: resourceId, isActive: true }
+        { id: resourceId },
+        { resourceId: resourceId },
+        { _id: resourceId }
       ]
     });
     
     if (!resource) {
-      console.log('⚠️ Resource not found or inactive:', resourceId);
-      // 🆕 RETURN SUCCESS EVEN IF RESOURCE NOT FOUND TO PREVENT FRONTEND ERRORS
+      console.log('⚠️ Resource not found for access tracking:', resourceId);
+      
+      // 🆕 DEBUG: LOG AVAILABLE RESOURCES
+      const availableResources = await Resource.find({}).select('id resourceId title -_id').limit(10);
+      console.log('🔍 First 10 available resources:', availableResources);
+      
+      // 🆕 RETURN SUCCESS TO PREVENT FRONTEND ERRORS
       return res.json({
         success: true,
-        message: 'Resource access noted (resource not found)'
+        message: 'Resource access noted (resource not found)',
+        debug: {
+          searchedId: resourceId,
+          availableResources: availableResources
+        }
       });
     }
 
-    // 🆕 SIMPLIFIED ACCESS RECORDING - DON'T BREAK IF THIS FAILS
+    console.log('✅ Found resource for access tracking:', resource.title);
+
+    // 🆕 SIMPLIFIED ACCESS RECORDING
     try {
       resource.accessedBy = resource.accessedBy || [];
       resource.accessedBy.push({
@@ -467,7 +480,6 @@ router.post('/resources/:resourceId/access', async (req, res) => {
       console.log('✅ Resource access recorded successfully');
     } catch (saveError) {
       console.warn('⚠️ Could not save access record (non-critical):', saveError);
-      // Don't fail the whole request for tracking issues
     }
 
     res.json({
@@ -477,7 +489,7 @@ router.post('/resources/:resourceId/access', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error recording resource access:', error);
-    // 🆕 RETURN SUCCESS EVEN ON ERROR TO PREVENT FRONTEND BREAKAGE
+    // 🆕 RETURN SUCCESS TO PREVENT FRONTEND BREAKAGE
     res.json({
       success: true,
       message: 'Resource access noted (error ignored)'
@@ -495,8 +507,9 @@ router.get('/resources/:resourceId/view', async (req, res) => {
     // 🆕 FLEXIBLE RESOURCE LOOKUP
     const resource = await Resource.findOne({ 
       $or: [
-        { id: resourceId, isActive: true },
-        { resourceId: resourceId, isActive: true }
+        { id: resourceId },
+        { resourceId: resourceId },
+        { _id: resourceId }
       ]
     });
     
@@ -1231,61 +1244,94 @@ router.get('/resources/archived', async (req, res) => {
   }
 });
 
-// 🆕 ADDED: DELETE RESOURCE ENDPOINT - GUARDED DELETE (REQUIRES ADMIN ID)
+// 🆕 COMPLETELY FIXED DELETE RESOURCE ENDPOINT WITH FLEXIBLE ID MATCHING
 router.delete('/resources/:resourceId', async (req, res) => {
   try {
     const { resourceId } = req.params;
-    const { adminId } = req.body; // 🆕 REQUIRE ADMIN ID FOR DELETION
-    
+    const { adminId } = req.body;
+
+    console.log('💀 GUARDED DELETING resource from database:', { 
+      resourceId, 
+      adminId,
+      timestamp: new Date().toISOString()
+    });
+
     if (!adminId) {
       return res.status(400).json({
         success: false,
         error: 'Admin ID required for deletion'
       });
     }
+
+    // 🆕 COMPREHENSIVE RESOURCE SEARCH - TRY MULTIPLE ID FIELDS
+    console.log('🔍 Searching for resource with flexible ID matching...');
     
-    console.log('💀 GUARDED DELETING resource from database:', resourceId, 'by admin:', adminId);
-    console.log('🔍 Searching for resource with ID:', resourceId);
-    
-    // Find the resource first to return info about what was deleted
-    const resource = await Resource.findOne({ 
+    const resource = await Resource.findOne({
       $or: [
         { id: resourceId },
-        { resourceId: resourceId }
+        { resourceId: resourceId },
+        { _id: resourceId }, // 🆕 TRY MONGOOSE _id
+        { id: { $regex: resourceId, $options: 'i' } }, // 🆕 PARTIAL MATCH
+        { resourceId: { $regex: resourceId, $options: 'i' } } // 🆕 PARTIAL MATCH
       ]
     });
-    
+
     if (!resource) {
-      console.log('❌ Resource not found with ID:', resourceId);
-      console.log('🔍 Available resources in database:');
-      const allResources = await Resource.find({});
-      console.log('Total resources:', allResources.length);
-      allResources.forEach(r => console.log(`- ${r.id}: ${r.title}`));
+      console.log('❌ Resource not found with any ID field:', resourceId);
       
+      // 🆕 DEBUG: LIST ALL RESOURCES TO SEE WHAT'S AVAILABLE
+      console.log('🔍 DEBUG: Listing all resources in database:');
+      const allResources = await Resource.find({});
+      console.log(`📊 Total resources in DB: ${allResources.length}`);
+      
+      allResources.forEach((r, index) => {
+        console.log(`📄 [${index}] ID: ${r.id}, ResourceID: ${r.resourceId}, _id: ${r._id}, Title: ${r.title}`);
+      });
+
       return res.status(404).json({ 
         success: false, 
-        error: 'Resource not found' 
+        error: 'Resource not found in database',
+        debug: {
+          searchedId: resourceId,
+          totalResources: allResources.length,
+          availableIds: allResources.map(r => ({
+            id: r.id,
+            resourceId: r.resourceId,
+            _id: r._id,
+            title: r.title
+          }))
+        }
       });
     }
-    
-    console.log('✅ Found resource to delete:', resource.title, 'ID:', resource.id);
-    
+
+    console.log('✅ Found resource to delete:', {
+      title: resource.title,
+      id: resource.id,
+      resourceId: resource.resourceId,
+      _id: resource._id
+    });
+
     // 🆕 USE RESOURCE GUARDIAN FOR SAFE DELETION
-    const result = await ResourceGuardian.manualAdminDelete(resourceId, adminId);
+    const result = await ResourceGuardian.manualAdminDelete(resource.id || resource.resourceId || resource._id, adminId);
     
     if (result.success) {
-      console.log('✅ Resource PERMANENTLY DELETED from database:', resource.title, resourceId);
+      console.log('✅ Resource PERMANENTLY DELETED from database:', resource.title);
       
       res.json({
         success: true,
         message: 'Resource PERMANENTLY deleted from database',
-        deletedResource: resource
+        deletedResource: {
+          id: resource.id,
+          resourceId: resource.resourceId,
+          title: resource.title,
+          type: resource.type
+        }
       });
     } else {
       console.error('❌ Resource Guardian deletion failed:', result.error);
       res.status(500).json({
         success: false,
-        error: result.error
+        error: result.error || 'Deletion failed'
       });
     }
     
@@ -1293,7 +1339,8 @@ router.delete('/resources/:resourceId', async (req, res) => {
     console.error('❌ Error deleting resource:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message 
+      error: 'Server error during deletion',
+      details: error.message 
     });
   }
 });
@@ -1384,6 +1431,79 @@ router.post('/cleanup/resources', async (req, res) => {
       success: false,
       error: 'Cleanup failed',
       details: error.message
+    });
+  }
+});
+
+// 🆕 ADD DEBUG ENDPOINT TO CHECK RESOURCE IDS
+router.get('/debug/resources/:resourceId', async (req, res) => {
+  try {
+    const { resourceId } = req.params;
+    
+    console.log('🔍 DEBUG: Checking resource ID:', resourceId);
+
+    // 🆕 CHECK ALL POSSIBLE ID FIELDS
+    const resourceById = await Resource.findOne({ id: resourceId });
+    const resourceByResourceId = await Resource.findOne({ resourceId: resourceId });
+    const resourceByMongoId = await Resource.findOne({ _id: resourceId });
+
+    const allResources = await Resource.find({}).select('id resourceId _id title type createdAt -_id');
+
+    res.json({
+      success: true,
+      search: {
+        byId: resourceById ? { id: resourceById.id, title: resourceById.title } : null,
+        byResourceId: resourceByResourceId ? { resourceId: resourceByResourceId.resourceId, title: resourceByResourceId.title } : null,
+        byMongoId: resourceByMongoId ? { _id: resourceByMongoId._id, title: resourceByMongoId.title } : null
+      },
+      allResources: allResources,
+      totalResources: allResources.length
+    });
+
+  } catch (error) {
+    console.error('❌ Debug error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 🆕 TEMPORARY: COMPLETE RESOURCES RESET
+router.delete('/admin/reset-resources', async (req, res) => {
+  try {
+    console.log('🔄 ADMIN: Resetting all resources...');
+    
+    // Delete all resources from database
+    const deleteResult = await Resource.deleteMany({});
+    
+    // Clear uploads directory
+    let files = [];
+    if (fs.existsSync(uploadsDir)) {
+      files = fs.readdirSync(uploadsDir);
+      files.forEach(file => {
+        const filePath = path.join(uploadsDir, file);
+        fs.unlinkSync(filePath);
+        console.log('🗑️ Deleted file:', file);
+      });
+    }
+    
+    console.log('✅ Resources reset complete');
+    
+    res.json({
+      success: true,
+      message: 'All resources have been reset',
+      deleted: {
+        resources: deleteResult.deletedCount,
+        files: files ? files.length : 0
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Reset error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
