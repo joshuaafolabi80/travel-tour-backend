@@ -885,85 +885,108 @@ router.post('/resources/share-json', async (req, res) => {
 });
 
 // 🆕 ADD SECURE FILE VIEWING ENDPOINT (NO DOWNLOADS)
+// 🆕 FIXED FILE SERVING ENDPOINT WITH BETTER PATH RESOLUTION
 router.get('/uploads/:filename', (req, res) => {
   try {
     const filename = req.params.filename;
     const filePath = path.join(uploadsDir, filename);
     
+    console.log('🔍 Serving file request:', {
+      filename: filename,
+      filePath: filePath,
+      uploadsDir: uploadsDir,
+      exists: fs.existsSync(filePath)
+    });
+    
     if (!fs.existsSync(filePath)) {
+      console.error('❌ File not found:', filePath);
+      
+      // 🆕 CHECK FOR ENCODED FILENAMES
+      const decodedFilename = decodeURIComponent(filename);
+      const decodedFilePath = path.join(uploadsDir, decodedFilename);
+      
+      if (fs.existsSync(decodedFilePath)) {
+        console.log('✅ Found file with decoded name:', decodedFilename);
+        serveFile(res, decodedFilePath, decodedFilename);
+        return;
+      }
+      
+      // 🆕 CHECK FOR SPACES REPLACED WITH DASHES/UNDERSCORES
+      const alternativeNames = [
+        filename.replace(/%20/g, ' '),
+        filename.replace(/%20/g, '-'),
+        filename.replace(/%20/g, '_'),
+        filename.replace(/ /g, '-'),
+        filename.replace(/ /g, '_')
+      ];
+      
+      for (const altName of alternativeNames) {
+        const altPath = path.join(uploadsDir, altName);
+        if (fs.existsSync(altPath)) {
+          console.log('✅ Found file with alternative name:', altName);
+          serveFile(res, altPath, altName);
+          return;
+        }
+      }
+      
       return res.status(404).json({
         success: false,
-        error: 'File not found'
+        error: 'File not found on server',
+        requested: filename,
+        checkedPaths: [filePath, decodedFilePath, ...alternativeNames.map(n => path.join(uploadsDir, n))]
       });
     }
 
-    // Set appropriate headers for INLINE VIEWING ONLY (no downloads)
-    const ext = path.extname(filename).toLowerCase();
-    const mimeTypes = {
-      '.pdf': 'application/pdf',
-      '.doc': 'application/msword',
-      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      '.xls': 'application/vnd.ms-excel',
-      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      '.ppt': 'application/vnd.ms-powerpoint',
-      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      '.txt': 'text/plain',
-      '.csv': 'text/csv',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png',
-      '.gif': 'image/gif',
-      '.webp': 'image/webp',
-      '.svg': 'image/svg+xml'
-    };
-
-    const mimeType = mimeTypes[ext] || 'application/octet-stream';
-    
-    // 🚫 CRITICAL: Set headers to force INLINE viewing and prevent downloads
-    res.setHeader('Content-Type', mimeType);
-    res.setHeader('Content-Disposition', 'inline'); // This forces browser to display, not download
-    res.setHeader('Content-Security-Policy', "default-src 'self'");
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    
-    const fileStream = fs.createReadStream(filePath);
-    fileStream.pipe(res);
+    serveFile(res, filePath, filename);
 
   } catch (error) {
     console.error('❌ Error serving file:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to serve file'
+      error: 'Failed to serve file',
+      details: error.message
     });
   }
 });
 
-// 🆕 ADD FILE DOWNLOAD ENDPOINT (FOR ADMIN USE ONLY)
-router.get('/uploads/:filename/download', (req, res) => {
-  try {
-    const filename = req.params.filename;
-    const filePath = path.join(uploadsDir, filename);
-    
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({
-        success: false,
-        error: 'File not found'
-      });
-    }
+// 🆕 HELPER FUNCTION TO SERVE FILES
+function serveFile(res, filePath, filename) {
+  const ext = path.extname(filename).toLowerCase();
+  const mimeTypes = {
+    '.pdf': 'application/pdf',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.txt': 'text/plain',
+    '.csv': 'text/csv',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml'
+  };
 
-    // Set headers for download
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    
-    const fileStream = fs.createReadStream(filePath);
-    fileStream.pipe(res);
-
-  } catch (error) {
-    console.error('❌ Error downloading file:', error);
+  const mimeType = mimeTypes[ext] || 'application/octet-stream';
+  
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Content-Disposition', 'inline');
+  res.setHeader('Content-Security-Policy', "default-src 'self'");
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  
+  const fileStream = fs.createReadStream(filePath);
+  fileStream.on('error', (error) => {
+    console.error('❌ File stream error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to download file'
+      error: 'Error reading file'
     });
-  }
-});
+  });
+  fileStream.pipe(res);
+}
 
 // 🆕 ENHANCED GET MEETING RESOURCES FROM DATABASE
 router.get('/resources/meeting/:meetingId', async (req, res) => {
