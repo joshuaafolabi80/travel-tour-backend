@@ -451,7 +451,7 @@ router.get('/resources/:resourceId/view', async (req, res) => {
           return res.json({
             success: true,
             contentType: 'pdf',
-            content: `/uploads/${filename}`, // Fixed URL - no double /api/meet/
+            content: `/api/meet/uploads/${filename}`, // 🆕 FIXED: Use full API path
             title: resource.title,
             resource: resource
           });
@@ -558,7 +558,7 @@ router.get('/resources/:resourceId/view', async (req, res) => {
           return res.json({
             success: true,
             contentType: 'image',
-            content: `/uploads/${filename}`, // Fixed URL - no double /api/meet/
+            content: `/api/meet/uploads/${filename}`, // 🆕 FIXED: Use full API path
             title: resource.title,
             resource: resource
           });
@@ -884,109 +884,215 @@ router.post('/resources/share-json', async (req, res) => {
   }
 });
 
-// 🆕 ADD SECURE FILE VIEWING ENDPOINT (NO DOWNLOADS)
-// 🆕 FIXED FILE SERVING ENDPOINT WITH BETTER PATH RESOLUTION
+// 🆕 COMPLETELY FIXED FILE SERVING ENDPOINT WITH COMPREHENSIVE PATH RESOLUTION
 router.get('/uploads/:filename', (req, res) => {
   try {
     const filename = req.params.filename;
-    const filePath = path.join(uploadsDir, filename);
     
-    console.log('🔍 Serving file request:', {
+    console.log('🔍 FILE SERVING REQUEST:', {
       filename: filename,
-      filePath: filePath,
       uploadsDir: uploadsDir,
-      exists: fs.existsSync(filePath)
+      requestUrl: req.url,
+      originalUrl: req.originalUrl
     });
-    
-    if (!fs.existsSync(filePath)) {
-      console.error('❌ File not found:', filePath);
+
+    // 🆕 COMPREHENSIVE FILENAME RESOLUTION
+    const possibleFilenames = [
+      filename, // Original filename
+      decodeURIComponent(filename), // URL decoded
+      filename.replace(/%20/g, ' '), // Spaces from %20
+      filename.replace(/%20/g, '-'), // Dashes from %20
+      filename.replace(/%20/g, '_'), // Underscores from %20
+      filename.replace(/ /g, '-'), // Spaces to dashes
+      filename.replace(/ /g, '_'), // Spaces to underscores
+      filename.replace(/\+/g, ' '), // Plus to spaces
+      filename.replace(/\+/g, '-'), // Plus to dashes
+    ];
+
+    // 🆕 ADD UNIQUE FILENAMES ONLY
+    const uniqueFilenames = [...new Set(possibleFilenames)];
+
+    console.log('🔍 CHECKING FILENAMES:', uniqueFilenames);
+
+    let foundFile = null;
+    let foundPath = null;
+
+    // 🆕 CHECK ALL POSSIBLE FILENAME VARIATIONS
+    for (const testFilename of uniqueFilenames) {
+      const testPath = path.join(uploadsDir, testFilename);
+      console.log('🔍 Checking path:', testPath);
       
-      // 🆕 CHECK FOR ENCODED FILENAMES
-      const decodedFilename = decodeURIComponent(filename);
-      const decodedFilePath = path.join(uploadsDir, decodedFilename);
-      
-      if (fs.existsSync(decodedFilePath)) {
-        console.log('✅ Found file with decoded name:', decodedFilename);
-        serveFile(res, decodedFilePath, decodedFilename);
-        return;
+      if (fs.existsSync(testPath)) {
+        foundFile = testFilename;
+        foundPath = testPath;
+        console.log('✅ FOUND FILE:', foundFile);
+        break;
       }
+    }
+
+    if (!foundFile) {
+      console.error('❌ FILE NOT FOUND - Checked all variations');
+      console.error('📁 Uploads directory contents:');
       
-      // 🆕 CHECK FOR SPACES REPLACED WITH DASHES/UNDERSCORES
-      const alternativeNames = [
-        filename.replace(/%20/g, ' '),
-        filename.replace(/%20/g, '-'),
-        filename.replace(/%20/g, '_'),
-        filename.replace(/ /g, '-'),
-        filename.replace(/ /g, '_')
-      ];
-      
-      for (const altName of alternativeNames) {
-        const altPath = path.join(uploadsDir, altName);
-        if (fs.existsSync(altPath)) {
-          console.log('✅ Found file with alternative name:', altName);
-          serveFile(res, altPath, altName);
-          return;
-        }
+      try {
+        const files = fs.readdirSync(uploadsDir);
+        console.error('📄 Files in uploads directory:', files);
+        
+        // 🆕 CHECK FOR SIMILAR FILENAMES
+        const similarFiles = files.filter(file => 
+          file.toLowerCase().includes(filename.toLowerCase()) ||
+          filename.toLowerCase().includes(file.toLowerCase())
+        );
+        
+        console.error('🔍 Similar files found:', similarFiles);
+        
+      } catch (dirError) {
+        console.error('❌ Cannot read uploads directory:', dirError.message);
       }
-      
+
       return res.status(404).json({
         success: false,
         error: 'File not found on server',
         requested: filename,
-        checkedPaths: [filePath, decodedFilePath, ...alternativeNames.map(n => path.join(uploadsDir, n))]
+        checkedVariations: uniqueFilenames,
+        uploadsDir: uploadsDir,
+        availableFiles: fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir) : 'Directory not found'
       });
     }
 
-    serveFile(res, filePath, filename);
+    // 🆕 DETERMINE MIME TYPE
+    const ext = path.extname(foundFile).toLowerCase();
+    const mimeTypes = {
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.txt': 'text/plain',
+      '.csv': 'text/csv',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml'
+    };
+
+    const mimeType = mimeTypes[ext] || 'application/octet-stream';
+    
+    console.log('✅ SERVING FILE:', {
+      file: foundFile,
+      path: foundPath,
+      mimeType: mimeType,
+      size: fs.statSync(foundPath).size
+    });
+
+    // 🆕 SET HEADERS FOR PROPER SERVING
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Content-Security-Policy', "default-src 'self'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+
+    // 🆕 STREAM FILE WITH ERROR HANDLING
+    const fileStream = fs.createReadStream(foundPath);
+    
+    fileStream.on('error', (error) => {
+      console.error('❌ File stream error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: 'Error reading file from server'
+        });
+      }
+    });
+    
+    fileStream.on('open', () => {
+      console.log('✅ File stream opened successfully');
+    });
+    
+    fileStream.pipe(res);
 
   } catch (error) {
-    console.error('❌ Error serving file:', error);
+    console.error('❌ CRITICAL ERROR serving file:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to serve file',
-      details: error.message
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
 
-// 🆕 HELPER FUNCTION TO SERVE FILES
-function serveFile(res, filePath, filename) {
-  const ext = path.extname(filename).toLowerCase();
-  const mimeTypes = {
-    '.pdf': 'application/pdf',
-    '.doc': 'application/msword',
-    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    '.xls': 'application/vnd.ms-excel',
-    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    '.ppt': 'application/vnd.ms-powerpoint',
-    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    '.txt': 'text/plain',
-    '.csv': 'text/csv',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.svg': 'image/svg+xml'
-  };
+// 🆕 ADD FILE DOWNLOAD ENDPOINT (FOR ADMIN USE ONLY)
+router.get('/uploads/:filename/download', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const filePath = path.join(uploadsDir, filename);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      });
+    }
 
-  const mimeType = mimeTypes[ext] || 'application/octet-stream';
-  
-  res.setHeader('Content-Type', mimeType);
-  res.setHeader('Content-Disposition', 'inline');
-  res.setHeader('Content-Security-Policy', "default-src 'self'");
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  
-  const fileStream = fs.createReadStream(filePath);
-  fileStream.on('error', (error) => {
-    console.error('❌ File stream error:', error);
+    // Set headers for download
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+
+  } catch (error) {
+    console.error('❌ Error downloading file:', error);
     res.status(500).json({
       success: false,
-      error: 'Error reading file'
+      error: 'Failed to download file'
     });
-  });
-  fileStream.pipe(res);
-}
+  }
+});
+
+// 🆕 DEBUG ENDPOINT TO CHECK UPLOADS DIRECTORY
+router.get('/debug/uploads', (req, res) => {
+  try {
+    if (!fs.existsSync(uploadsDir)) {
+      return res.json({
+        success: false,
+        error: 'Uploads directory does not exist',
+        uploadsDir: uploadsDir
+      });
+    }
+
+    const files = fs.readdirSync(uploadsDir);
+    const fileDetails = files.map(file => {
+      const filePath = path.join(uploadsDir, file);
+      const stats = fs.statSync(filePath);
+      return {
+        name: file,
+        size: stats.size,
+        modified: stats.mtime,
+        isFile: stats.isFile()
+      };
+    });
+
+    res.json({
+      success: true,
+      uploadsDir: uploadsDir,
+      totalFiles: files.length,
+      files: fileDetails
+    });
+
+  } catch (error) {
+    console.error('❌ Debug uploads error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to read uploads directory',
+      details: error.message
+    });
+  }
+});
 
 // 🆕 ENHANCED GET MEETING RESOURCES FROM DATABASE
 router.get('/resources/meeting/:meetingId', async (req, res) => {
@@ -1488,7 +1594,7 @@ router.use((error, req, res, next) => {
   if (error.message) {
     return res.status(400).json({
       success: false,
-      error: error.message
+        error: error.message
     });
   }
   
