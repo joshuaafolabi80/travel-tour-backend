@@ -130,33 +130,56 @@ class ResourceGuardian {
     console.log('✅ 24/7 monitoring activated');
   }
 
-  // 🔧 MANUAL ADMIN DELETION HELPER (ONLY WAY TO DELETE) - FIXED
+  // 🆕 ENHANCED DELETE FUNCTION WITH CONFIRMATION DIALOG
+  // 🔧 MANUAL ADMIN DELETION HELPER (ONLY WAY TO DELETE) - FIXED FOR HARD DELETE
+  // 🔧 MANUAL ADMIN DELETION HELPER (ONLY WAY TO DELETE) - FIXED FOR HARD DELETE
   static async manualAdminDelete(resourceId, adminId) {
     try {
-      console.log(`👑 ADMIN MANUAL DELETION: ${resourceId} by admin ${adminId}`);
+      console.log(`👑 ADMIN HARD DELETE REQUEST: ${resourceId} by admin ${adminId}`);
       
-      // 🆕 FIXED: Use resourceId field instead of _id
+      // Find the resource first
       const resource = await Resource.findOne({ resourceId: resourceId });
       if (!resource) {
         throw new Error('Resource not found');
       }
       
-      // ONLY THIS METHOD CAN DEACTIVATE RESOURCES
-      const result = await Resource.updateOne(
-        { resourceId: resourceId }, // 🆕 FIXED: Use resourceId field
-        { 
-          isActive: false,
-          deactivatedAt: new Date(),
-          deletedByAdmin: adminId,
-          deletionMethod: 'manual_admin'
-        }
-      );
+      console.log(`🗑️ PERMANENTLY DELETING: ${resource.title} (${resource.resourceId})`);
       
-      console.log(`✅ ADMIN DELETION SUCCESS: ${resource.title} deleted by admin ${adminId}`);
-      return { success: true, resource };
+      // 🆕 CRITICAL: ACTUAL DATABASE DELETION (HARD DELETE)
+      const deleteResult = await Resource.deleteOne({ resourceId: resourceId });
+      
+      if (deleteResult.deletedCount === 1) {
+        console.log(`✅ HARD DELETE SUCCESS: ${resource.title} permanently removed from database`);
+        
+        // 🆕 DELETE PHYSICAL FILE IF IT EXISTS
+        if (resource.fileUrl && resource.fileUrl.includes('/uploads/')) {
+          const fs = require('fs');
+          const path = require('path');
+          const filename = resource.fileUrl.split('/').pop();
+          const uploadsDir = path.join(__dirname, '../uploads');
+          const filePath = path.join(uploadsDir, filename);
+          
+          try {
+            if (fs.existsSync(filePath)) {
+              fs.unlinkSync(filePath);
+              console.log(`🗑️ Also deleted physical file: ${filename}`);
+            }
+          } catch (fileError) {
+            console.warn('⚠️ Could not delete physical file (non-critical):', fileError.message);
+          }
+        }
+        
+        return { 
+          success: true, 
+          resource: resource,
+          message: 'Resource permanently deleted from database and storage'
+        };
+      } else {
+        throw new Error('Failed to delete resource from database - no documents were deleted');
+      }
       
     } catch (error) {
-      console.error('❌ Admin deletion failed:', error);
+      console.error('❌ HARD DELETE FAILED:', error);
       return { success: false, error: error.message };
     }
   }
