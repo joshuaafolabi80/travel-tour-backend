@@ -504,14 +504,8 @@ router.get('/resources/:resourceId/view', async (req, res) => {
     
     console.log('🎯 Viewing resource content:', resourceId);
 
-    // 🆕 FLEXIBLE RESOURCE LOOKUP
-    const resource = await Resource.findOne({ 
-      $or: [
-        { id: resourceId },
-        { resourceId: resourceId },
-        { _id: resourceId }
-      ]
-    });
+    // 🆕 FIXED: Use resourceId field for lookup
+    const resource = await Resource.findOne({ resourceId: resourceId });
     
     if (!resource) {
       console.log('❌ Resource not found:', resourceId);
@@ -614,7 +608,7 @@ router.get('/resources/:resourceId/view', async (req, res) => {
           
           // 🆕 WRAP CONTENT IN JUSTIFIED CONTAINER IF NO BODY TAG
           if (!htmlContent.includes('<body')) {
-            htmlContent = `<div style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px;">${htmlContent}</div>`;
+            htmlContent = `<div style="text-align: justify; line-height: 1.7; font-size: 16px; font-family: 'Segoe UI\', Tahoma, Geneva, Verdana, sans-serif; word-spacing: 0.1em; letter-spacing: 0.01em; padding: 20px;">${htmlContent}</div>`;
           }
           
           // 🆕 ENSURE ALL PARAGRAPHS ARE JUSTIFIED
@@ -1263,21 +1257,11 @@ router.delete('/resources/:resourceId', async (req, res) => {
       });
     }
 
-    // 🆕 COMPREHENSIVE RESOURCE SEARCH - TRY MULTIPLE ID FIELDS
-    console.log('🔍 Searching for resource with flexible ID matching...');
-    
-    const resource = await Resource.findOne({
-      $or: [
-        { id: resourceId },
-        { resourceId: resourceId },
-        { _id: resourceId }, // 🆕 TRY MONGOOSE _id
-        { id: { $regex: resourceId, $options: 'i' } }, // 🆕 PARTIAL MATCH
-        { resourceId: { $regex: resourceId, $options: 'i' } } // 🆕 PARTIAL MATCH
-      ]
-    });
+    // 🆕 FIXED: Use resourceId field for lookup
+    const resource = await Resource.findOne({ resourceId: resourceId });
 
     if (!resource) {
-      console.log('❌ Resource not found with any ID field:', resourceId);
+      console.log('❌ Resource not found with resourceId:', resourceId);
       
       // 🆕 DEBUG: LIST ALL RESOURCES TO SEE WHAT'S AVAILABLE
       console.log('🔍 DEBUG: Listing all resources in database:');
@@ -1312,7 +1296,7 @@ router.delete('/resources/:resourceId', async (req, res) => {
     });
 
     // 🆕 USE RESOURCE GUARDIAN FOR SAFE DELETION
-    const result = await ResourceGuardian.manualAdminDelete(resource.id || resource.resourceId || resource._id, adminId);
+    const result = await ResourceGuardian.manualAdminDelete(resource.resourceId, adminId);
     
     if (result.success) {
       console.log('✅ Resource PERMANENTLY DELETED from database:', resource.title);

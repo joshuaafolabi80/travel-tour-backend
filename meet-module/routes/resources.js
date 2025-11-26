@@ -1,4 +1,3 @@
-// travel-tour-backend/meet-module/routes/resources.js
 const express = require('express');
 const router = express.Router();
 const Resource = require('../models/Resource');
@@ -83,8 +82,9 @@ router.post('/:resourceId/access', async (req, res) => {
       });
     }
     
+    // 🆕 FIXED: Use resourceId field instead of _id
     await Resource.updateOne(
-      { resourceId },
+      { resourceId: resourceId },
       {
         $push: {
           accessedBy: {
@@ -109,16 +109,22 @@ router.post('/:resourceId/access', async (req, res) => {
   }
 });
 
-// ✅ GET RESOURCE BY ID
+// ✅ GET RESOURCE BY ID - FIXED TO USE resourceId FIELD
 router.get('/:resourceId', async (req, res) => {
   try {
     const { resourceId } = req.params;
     
-    const resource = await Resource.findOne({ resourceId });
+    console.log('🔍 Getting resource by resourceId:', resourceId);
+    
+    // 🆕 FIXED: Use resourceId field instead of _id
+    const resource = await Resource.findOne({ resourceId: resourceId });
     
     if (!resource) {
+      console.log('❌ Resource not found with resourceId:', resourceId);
       return res.status(404).json({ success: false, error: 'Resource not found' });
     }
+    
+    console.log('✅ Found resource:', resource.title);
     
     res.json({
       success: true,
@@ -131,7 +137,48 @@ router.get('/:resourceId', async (req, res) => {
   }
 });
 
-// 🛡️ GUARDED: DELETE RESOURCE (ONLY MANUAL ADMIN DELETION ALLOWED)
+// 🆕 ADD VIEW RESOURCE CONTENT ENDPOINT - FIXED
+router.get('/:resourceId/view', async (req, res) => {
+  try {
+    const { resourceId } = req.params;
+    
+    console.log('🔍 Viewing resource content for resourceId:', resourceId);
+    
+    // 🆕 FIXED: Use resourceId field instead of _id
+    const resource = await Resource.findOne({ resourceId: resourceId });
+    
+    if (!resource) {
+      console.log('❌ Resource not found for viewing:', resourceId);
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Resource not found or has been deleted' 
+      });
+    }
+
+    console.log('✅ Found resource for viewing:', resource.title, 'Type:', resource.type);
+
+    // Return resource data for frontend to handle display
+    res.json({
+      success: true,
+      contentType: resource.type,
+      content: resource.content,
+      title: resource.title,
+      resource: resource,
+      fileUrl: resource.fileUrl,
+      fileName: resource.fileName
+    });
+
+  } catch (error) {
+    console.error('❌ Error viewing resource:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load resource content',
+      details: error.message
+    });
+  }
+});
+
+// 🛡️ GUARDED: DELETE RESOURCE - FIXED TO USE resourceId FIELD
 router.delete('/:resourceId', async (req, res) => {
   try {
     const { resourceId } = req.params;
@@ -146,7 +193,7 @@ router.delete('/:resourceId', async (req, res) => {
     
     console.log(`👑 ADMIN DELETE REQUEST: ${resourceId} by admin ${adminId}`);
     
-    // Use the guarded deletion method
+    // 🆕 FIXED: Use resourceId field in the guardian
     const result = await ResourceGuardian.manualAdminDelete(resourceId, adminId);
     
     if (result.success) {
@@ -171,11 +218,11 @@ router.delete('/:resourceId', async (req, res) => {
   }
 });
 
-// 🛡️ GUARDED: HARD DELETE RESOURCE (completely remove from database - ONLY ADMIN)
+// 🛡️ GUARDED: HARD DELETE RESOURCE - FIXED
 router.delete('/:resourceId/hard', async (req, res) => {
   try {
     const { resourceId } = req.params;
-    const { adminId } = req.body; // Admin must provide their ID
+    const { adminId } = req.body;
     
     if (!adminId) {
       return res.status(400).json({
@@ -186,7 +233,8 @@ router.delete('/:resourceId/hard', async (req, res) => {
     
     console.log(`💀 ADMIN HARD DELETE REQUEST: ${resourceId} by admin ${adminId}`);
     
-    const resource = await Resource.findOne({ resourceId });
+    // 🆕 FIXED: Use resourceId field
+    const resource = await Resource.findOne({ resourceId: resourceId });
     
     if (!resource) {
       return res.status(404).json({ 
@@ -195,7 +243,7 @@ router.delete('/:resourceId/hard', async (req, res) => {
       });
     }
     
-    // Actually delete the resource from the database (only allowed through guardian)
+    // Use the guarded deletion method
     const result = await ResourceGuardian.manualAdminDelete(resourceId, adminId);
     
     if (result.success) {
@@ -222,7 +270,7 @@ router.delete('/:resourceId/hard', async (req, res) => {
   }
 });
 
-// 🛡️ RECOVER RESOURCE (Admin only)
+// 🛡️ RECOVER RESOURCE - FIXED
 router.put('/:resourceId/recover', async (req, res) => {
   try {
     const { resourceId } = req.params;

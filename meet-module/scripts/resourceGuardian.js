@@ -1,6 +1,3 @@
-// 🛡️ RESOURCE GUARDIAN - BLOCKS ALL AUTO-DELETION
-// travel-tour-backend/meet-module/scripts/resourceGuardian.js
-
 const mongoose = require('mongoose');
 const Resource = require('../models/Resource');
 
@@ -133,19 +130,20 @@ class ResourceGuardian {
     console.log('✅ 24/7 monitoring activated');
   }
 
-  // 🔧 MANUAL ADMIN DELETION HELPER (ONLY WAY TO DELETE)
+  // 🔧 MANUAL ADMIN DELETION HELPER (ONLY WAY TO DELETE) - FIXED
   static async manualAdminDelete(resourceId, adminId) {
     try {
       console.log(`👑 ADMIN MANUAL DELETION: ${resourceId} by admin ${adminId}`);
       
-      const resource = await Resource.findOne({ resourceId });
+      // 🆕 FIXED: Use resourceId field instead of _id
+      const resource = await Resource.findOne({ resourceId: resourceId });
       if (!resource) {
         throw new Error('Resource not found');
       }
       
       // ONLY THIS METHOD CAN DEACTIVATE RESOURCES
       const result = await Resource.updateOne(
-        { resourceId },
+        { resourceId: resourceId }, // 🆕 FIXED: Use resourceId field
         { 
           isActive: false,
           deactivatedAt: new Date(),
@@ -163,13 +161,14 @@ class ResourceGuardian {
     }
   }
 
-  // 🔄 RECOVER ACCIDENTALLY DELETED RESOURCES
+  // 🔄 RECOVER ACCIDENTALLY DELETED RESOURCES - FIXED
   static async recoverResource(resourceId, adminId) {
     try {
       console.log(`🔄 ADMIN RECOVERY: ${resourceId} by admin ${adminId}`);
       
+      // 🆕 FIXED: Use resourceId field instead of _id
       const result = await Resource.updateOne(
-        { resourceId },
+        { resourceId: resourceId }, // 🆕 FIXED: Use resourceId field
         { 
           isActive: true,
           $unset: { deactivatedAt: "", deletedByAdmin: "", deletionMethod: "" },
