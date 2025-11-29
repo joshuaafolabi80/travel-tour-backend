@@ -55,9 +55,11 @@ app.use('/api/meet', require('./meet-module/apiGateway').router);
 // Public Routes (no auth required)
 const { router: authRouter, authMiddleware } = require('./routes/auth');
 const messageRoutes = require('./routes/messages');
+const hotelRoutes = require('./routes/hotels'); // 🏨 ADDED: Hotel routes
 
 app.use('/api/auth', authRouter);
 app.use('/api/messages', messageRoutes);
+app.use('/api', hotelRoutes); // 🏨 ADDED: Hotel routes
 
 // 🚨 REMOVED: Community Routes (WebRTC/Agora - old system)
 // 🚨 REMOVED: Agora Token Routes (WebRTC/Agora - old system)
@@ -1425,7 +1427,11 @@ app.get('/api/debug-routes', (req, res) => {
     '/api/debug/upload-test',
     '/api/debug/courses',
     '/api/debug/courses/lookup/:id',
-    '/api/debug/quiz-collections'
+    '/api/debug/quiz-collections',
+    // 🏨 ADDED: Hotel Search Routes
+    '/api/search-hotels',
+    '/api/get-hotel-details',
+    '/api/get-hotel-rates'
   ];
   
   console.log('🐛 DEBUG: Listing available routes');
@@ -2698,6 +2704,10 @@ const startServer = async () => {
       console.log(`📍   Create meeting: http://localhost:${PORT}/api/meet/create`);
       console.log(`📍   Get active meeting: http://localhost:${PORT}/api/meet/active`);
       console.log(`📍   Meet health check: http://localhost:${PORT}/api/meet/health`);
+      console.log(`\n🏨 HOTEL SEARCH ROUTES - NEWLY ADDED:`);
+      console.log(`📍   Search hotels: http://localhost:${PORT}/api/search-hotels`);
+      console.log(`📍   Get hotel details: http://localhost:${PORT}/api/get-hotel-details`);
+      console.log(`📍   Get hotel rates: http://localhost:${PORT}/api/get-hotel-rates`);
       console.log(`\n🐛 Debug routes:`);
       console.log(`📍   Quiz collections debug: http://localhost:${PORT}/api/debug/quiz-collections`);
       console.log(`📍   Quiz by destination debug: http://localhost:${PORT}/api/debug/quiz-by-destination`);
@@ -2717,6 +2727,7 @@ const startServer = async () => {
       console.log('🎥 Video system: Cloudinary integration for video storage and streaming');
       console.log('📊 Video counts: New endpoints for accurate badge notifications');
       console.log('🎯 GOOGLE MEET INTEGRATION: Professional video meetings with resource sharing');
+      console.log('🏨 HOTEL SEARCH: Global hotel search with detailed information and rates');
       console.log('🚫 WEBRTC/AGORA REMOVED: Old audio system completely removed');
       console.log('🌐 CORS configured for production: the-conclave-academy.netlify.app and travel-tour-academy-backend.onrender.com');
       console.log('📦 Frontend static files served from: ../dist directory');
@@ -2733,6 +2744,12 @@ const startServer = async () => {
       console.log('✅ Automatic extensions');
       console.log('✅ File upload support');
       console.log('✅ Real-time notifications');
+      console.log('\n🏨 HOTEL SEARCH FEATURES:');
+      console.log('✅ Global hotel search');
+      console.log('✅ Detailed hotel information');
+      console.log('✅ Room rates and availability');
+      console.log('✅ Multiple suppliers integration');
+      console.log('✅ Real-time pricing');
       console.log('\n💬 CHAT SYSTEM:');
       console.log('✅ Real-time messaging');
       console.log('✅ Admin badge showing for admin messages');
