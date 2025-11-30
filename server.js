@@ -55,11 +55,11 @@ app.use('/api/meet', require('./meet-module/apiGateway').router);
 // Public Routes (no auth required)
 const { router: authRouter, authMiddleware } = require('./routes/auth');
 const messageRoutes = require('./routes/messages');
-const hotelRoutes = require('./routes/hotels'); // 🏨 ADDED: Hotel routes - PUBLIC
+//const hotelRoutes = require('./routes/hotels'); // 🏨 ADDED: Hotel routes - PUBLIC
 
 app.use('/api/auth', authRouter);
 app.use('/api/messages', messageRoutes);
-app.use('/api', hotelRoutes); // 🏨 ADDED: Hotel routes - PUBLIC (no auth required)
+// app.use('/api', hotelRoutes); // 🏨 ADDED: Hotel routes - PUBLIC (no auth required)
 
 // 🚨 REMOVED: Community Routes (WebRTC/Agora - old system)
 // 🚨 REMOVED: Agora Token Routes (WebRTC/Agora - old system)
@@ -1430,8 +1430,8 @@ app.get('/api/debug-routes', (req, res) => {
     '/api/debug/quiz-collections',
     // 🏨 ADDED: Hotel Search Routes - PUBLIC
     '/api/search-hotels',
-    '/api/get-hotel-details',
-    '/api/get-hotel-rates'
+    //'/api/get-hotel-details',
+    //'/api/get-hotel-rates'
   ];
   
   console.log('🐛 DEBUG: Listing available routes');
