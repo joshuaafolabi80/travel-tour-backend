@@ -1,4 +1,3 @@
-// travel-tour-backend/models/AccessCode.js - COMPLETELY UPDATED
 const mongoose = require('mongoose');
 
 const accessCodeSchema = new mongoose.Schema({

@@ -1,4 +1,3 @@
-// travel-tour-backend/routes/admin.js - COMPLETELY UPDATED
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
@@ -156,6 +155,11 @@ router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, up
       return res.status(400).json({ success: false, message: 'Access code is required for masterclass courses' });
     }
 
+    // If masterclass course, email is NOW REQUIRED (no generic codes)
+    if (courseType === 'masterclass' && !accessCodeEmail) {
+      return res.status(400).json({ success: false, message: 'Email address is required for masterclass access codes' });
+    }
+
     // If email is provided with access code, validate it
     if (accessCodeEmail) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -242,8 +246,9 @@ router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, up
           await AccessCode.createAssignedAccessCode(accessCodeData);
           console.log(`✅ Created ASSIGNED access code for email: ${accessCodeEmail}`);
         } else {
-          await AccessCode.createGenericAccessCode(accessCodeData);
-          console.log(`✅ Created GENERIC access code (no email assigned)`);
+          // REMOVED: Generic codes are no longer allowed
+          // await AccessCode.createGenericAccessCode(accessCodeData);
+          console.log(`❌ Generic codes are no longer allowed. Email is required.`);
         }
       } catch (codeError) {
         console.error('❌ Error creating access code:', codeError);

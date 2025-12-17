@@ -107,9 +107,30 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
       });
     }
 
+    // Clean the access code
+    const cleanAccessCode = accessCode.trim().toUpperCase();
+
+    // UPDATED: Validate access code length (1-20 characters) - FLEXIBLE
+    if (cleanAccessCode.length < 1) {
+      console.log('❌ Invalid access code length:', cleanAccessCode.length);
+      return res.status(400).json({
+        success: false,
+        message: 'Access code is required'
+      });
+    }
+
+    // Allow any length from 1-20 characters
+    if (cleanAccessCode.length > 20) {
+      console.log('❌ Access code too long:', cleanAccessCode.length);
+      return res.status(400).json({
+        success: false,
+        message: 'Access code must be 20 characters or less'
+      });
+    }
+
     // Find the access code - UPDATED: No longer requires assignedEmail in query
     const accessCodeRecord = await AccessCode.findOne({ 
-      code: accessCode.trim().toUpperCase()
+      code: cleanAccessCode
     }).populate('courseId');
 
     if (!accessCodeRecord) {
@@ -200,9 +221,30 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
       });
     }
 
+    // Clean the access code
+    const cleanAccessCode = accessCode.trim().toUpperCase();
+
+    // UPDATED: Validate access code length (1-20 characters) - FLEXIBLE
+    if (cleanAccessCode.length < 1) {
+      console.log('❌ Invalid access code length:', cleanAccessCode.length);
+      return res.status(400).json({
+        success: false,
+        message: 'Access code is required'
+      });
+    }
+
+    // Allow any length from 1-20 characters
+    if (cleanAccessCode.length > 20) {
+      console.log('❌ Access code too long:', cleanAccessCode.length);
+      return res.status(400).json({
+        success: false,
+        message: 'Access code must be 20 characters or less'
+      });
+    }
+
     // Find the access code - UPDATED: No longer requires assignedEmail in query
     const accessCodeRecord = await AccessCode.findOne({ 
-      code: accessCode.trim().toUpperCase(),
+      code: cleanAccessCode,
       courseType: 'document' // Assuming videos use document type
     });
 
