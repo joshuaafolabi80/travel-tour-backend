@@ -1,3 +1,5 @@
+// travel-tour-backend/socket.js
+
 const { Server } = require('socket.io');
 
 let io;

@@ -1,4 +1,5 @@
-// server/routes/admin.js - COMPLETE UNABRIDGED VERSION
+// travel-tour-backend/routes/admin.js
+
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
@@ -641,7 +642,94 @@ router.post('/admin/courses/:id/generate-access-code', authMiddleware, adminMidd
   }
 });
 
-// Get access codes for a course
+// ===== ACCESS CODE MANAGEMENT ROUTES =====
+
+// Generate access code for specific user
+router.post('/admin/courses/:id/generate-access-code-for-user', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const courseId = req.params.id;
+    const { userEmail, userName, maxUsageCount = 1, lifetimeAccess = true } = req.body;
+    
+    if (!userEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'User email is required'
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(userEmail.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid email address'
+      });
+    }
+
+    let course = await DocumentCourse.findById(courseId);
+    if (!course) {
+      course = await Course.findById(courseId);
+    }
+    
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Course not found' });
+    }
+
+    if (course.courseType !== 'masterclass') {
+      return res.status(400).json({ success: false, message: 'Access codes can only be generated for masterclass courses' });
+    }
+
+    // Generate unique access code using the existing helper function
+    const accessCode = generateAccessCode();
+    
+    const accessCodeRecord = new AccessCode({
+      code: accessCode,
+      courseId: course._id,
+      courseType: course.courseType === 'masterclass' ? 'document' : 'destination',
+      assignedEmail: userEmail.trim().toLowerCase(),
+      assignedUserName: userName?.trim() || '',
+      generatedBy: req.user._id,
+      maxUsageCount: maxUsageCount,
+      expiresAt: lifetimeAccess ? new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+    });
+
+    await accessCodeRecord.save();
+
+    res.json({
+      success: true,
+      message: 'Access code generated successfully',
+      accessCode: accessCodeRecord.code,
+      userEmail: userEmail.trim()
+    });
+  } catch (error) {
+    console.error('Error generating access code for user:', error);
+    res.status(500).json({ success: false, message: 'Error generating access code' });
+  }
+});
+
+// Delete access code
+router.delete('/admin/access-codes/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const accessCodeId = req.params.id;
+    
+    const accessCode = await AccessCode.findById(accessCodeId);
+    if (!accessCode) {
+      return res.status(404).json({ success: false, message: 'Access code not found' });
+    }
+
+    await AccessCode.findByIdAndDelete(accessCodeId);
+
+    res.json({
+      success: true,
+      message: 'Access code deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting access code:', error);
+    res.status(500).json({ success: false, message: 'Error deleting access code' });
+  }
+});
+
+// Get access codes for a course (updated to include email info)
 router.get('/admin/courses/:id/access-codes', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const accessCodes = await AccessCode.find({ courseId: req.params.id })
@@ -1306,15 +1394,6 @@ router.post('/admin/generate-access-code', authMiddleware, adminMiddleware, asyn
     console.log(`🔒 ADMIN: Generating access code for student: ${studentId}, course: ${courseId}`);
 
     // Generate unique access code
-    const generateAccessCode = () => {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      let result = '';
-      for (let i = 0; i < 8; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      return result;
-    };
-
     const accessCode = generateAccessCode();
 
     // Find course title

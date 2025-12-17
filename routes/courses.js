@@ -1,4 +1,4 @@
-// routes/courses.js - FIXED VERSION WITH PROPER ROUTE ORDER
+// travel-tour-backend/routes/courses.js
 const express = require('express');
 const mongoose = require('mongoose');
 const DocumentCourse = require('../models/DocumentCourse');
@@ -84,8 +84,163 @@ router.get('/courses/notification-counts', authMiddleware, async (req, res) => {
   }
 });
 
-// Masterclass Access Code Validation - MUST BE BEFORE :id
-router.post('/courses/validate-masterclass-access', authMiddleware, async (req, res) => {
+// ===== NEW ACCESS CODE VALIDATION ROUTES =====
+
+// Validate masterclass access code with email
+router.post('/courses/validate-masterclass-access', async (req, res) => {
+  try {
+    const { accessCode, userEmail } = req.body;
+    
+    if (!accessCode || !userEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Access code and email address are required'
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(userEmail.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid email address'
+      });
+    }
+
+    // Find the access code
+    const accessCodeRecord = await AccessCode.findOne({ 
+      code: accessCode.trim().toUpperCase(),
+      assignedEmail: userEmail.trim().toLowerCase()
+    }).populate('courseId');
+
+    if (!accessCodeRecord) {
+      return res.status(404).json({
+        success: false,
+        message: 'Access code not found or not assigned to this email'
+      });
+    }
+
+    // Check if access code is valid
+    if (!accessCodeRecord.isValid()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Access code is no longer valid (expired or max usage reached)'
+      });
+    }
+
+    // Check if user exists
+    let user = await User.findOne({ email: userEmail.trim().toLowerCase() });
+    if (!user) {
+      // Create a temporary user if doesn't exist
+      user = new User({
+        email: userEmail.trim().toLowerCase(),
+        username: userEmail.trim().toLowerCase().split('@')[0],
+        role: 'student',
+        active: true
+      });
+      await user.save();
+    }
+
+    // Mark as used
+    await accessCodeRecord.markAsUsed(user._id, userEmail.trim().toLowerCase());
+
+    res.json({
+      success: true,
+      message: 'Access granted to masterclass courses',
+      access: true,
+      userName: user.username,
+      courseTitle: accessCodeRecord.courseId?.title || 'Masterclass Course'
+    });
+
+  } catch (error) {
+    console.error('Error validating access code:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error validating access code',
+      error: error.message
+    });
+  }
+});
+
+// Validate masterclass video access code with email
+router.post('/videos/validate-masterclass-access', async (req, res) => {
+  try {
+    const { accessCode, userEmail } = req.body;
+    
+    if (!accessCode || !userEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Access code and email address are required'
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(userEmail.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid email address'
+      });
+    }
+
+    // Find the access code (for videos, we might need a different approach)
+    // For now, we'll use the same AccessCode model but check if it's for videos
+    const accessCodeRecord = await AccessCode.findOne({ 
+      code: accessCode.trim().toUpperCase(),
+      assignedEmail: userEmail.trim().toLowerCase(),
+      courseType: 'document' // Assuming videos use document type
+    });
+
+    if (!accessCodeRecord) {
+      return res.status(404).json({
+        success: false,
+        message: 'Access code not found or not assigned to this email'
+      });
+    }
+
+    // Check if access code is valid
+    if (!accessCodeRecord.isValid()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Access code is no longer valid (expired or max usage reached)'
+      });
+    }
+
+    // Check if user exists
+    let user = await User.findOne({ email: userEmail.trim().toLowerCase() });
+    if (!user) {
+      // Create a temporary user if doesn't exist
+      user = new User({
+        email: userEmail.trim().toLowerCase(),
+        username: userEmail.trim().toLowerCase().split('@')[0],
+        role: 'student',
+        active: true
+      });
+      await user.save();
+    }
+
+    // Mark as used
+    await accessCodeRecord.markAsUsed(user._id, userEmail.trim().toLowerCase());
+
+    res.json({
+      success: true,
+      message: 'Access granted to masterclass videos',
+      access: true,
+      userName: user.username
+    });
+
+  } catch (error) {
+    console.error('Error validating video access code:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error validating access code',
+      error: error.message
+    });
+  }
+});
+
+// Original masterclass access code validation (kept for backward compatibility)
+router.post('/courses/validate-masterclass-access-original', authMiddleware, async (req, res) => {
   try {
     const { accessCode } = req.body;
     
@@ -227,7 +382,7 @@ router.get('/courses/:id', authMiddleware, async (req, res) => {
     console.log(`🔍 Looking for course with ID: ${courseId}`);
     
     // Skip if this is a special route that should have been caught earlier
-    if (['notification-counts', 'destinations', 'debug', 'validate-masterclass-access'].includes(courseId)) {
+    if (['notification-counts', 'destinations', 'debug', 'validate-masterclass-access', 'validate-masterclass-access-original'].includes(courseId)) {
       return res.status(404).json({ 
         success: false, 
         message: 'Course not found' 
