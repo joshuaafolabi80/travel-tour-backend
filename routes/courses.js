@@ -86,7 +86,7 @@ router.get('/courses/notification-counts', authMiddleware, async (req, res) => {
 
 // ===== UPDATED ACCESS CODE VALIDATION ROUTES =====
 
-// Validate masterclass access code with email - UPDATED FOR GENERIC/ASSIGNED CODES
+// Validate masterclass access code with email - UPDATED WITH FIXED findValidCode
 router.post('/courses/validate-masterclass-access', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
@@ -128,19 +128,20 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
       });
     }
 
-    // Find the access code - UPDATED: No longer requires assignedEmail in query
-    const accessCodeRecord = await AccessCode.findOne({ 
-      code: cleanAccessCode
-    }).populate('courseId');
+    // 🚨 FIXED: Use the corrected findValidCode method instead of findOne
+    const accessCodeRecord = await AccessCode.findValidCode(
+      cleanAccessCode, 
+      userEmail.trim().toLowerCase()
+    );
 
     if (!accessCodeRecord) {
       return res.status(404).json({
         success: false,
-        message: 'Access code not found'
+        message: 'Invalid access code or access denied'
       });
     }
 
-    // Check if access code is valid
+    // Check if access code is valid using the instance method
     if (!accessCodeRecord.isValid()) {
       return res.status(400).json({
         success: false,
@@ -148,7 +149,7 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
       });
     }
 
-    // Check if it's an assigned code and verify email - UPDATED LOGIC
+    // Check if it's an assigned code and verify email
     if (accessCodeRecord.codeType === 'assigned' && accessCodeRecord.assignedEmail) {
       if (accessCodeRecord.assignedEmail.toLowerCase() !== userEmail.trim().toLowerCase()) {
         return res.status(400).json({
@@ -171,7 +172,7 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
       await user.save();
     }
 
-    // Mark as used (will assign email to generic codes) - UPDATED
+    // Mark as used (will assign email to generic codes)
     await accessCodeRecord.markAsUsed(user._id, userEmail.trim().toLowerCase());
 
     // Add course to user's accessible masterclass courses if not already there
@@ -200,7 +201,7 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
   }
 });
 
-// Validate masterclass video access code with email - UPDATED FOR GENERIC/ASSIGNED CODES
+// Validate masterclass video access code with email - UPDATED WITH FIXED findValidCode
 router.post('/videos/validate-masterclass-access', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
@@ -242,11 +243,11 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
       });
     }
 
-    // Find the access code - UPDATED: No longer requires assignedEmail in query
-    const accessCodeRecord = await AccessCode.findOne({ 
-      code: cleanAccessCode,
-      courseType: 'document' // Assuming videos use document type
-    });
+    // 🚨 FIXED: Use the corrected findValidCode method
+    const accessCodeRecord = await AccessCode.findValidCode(
+      cleanAccessCode, 
+      userEmail.trim().toLowerCase()
+    );
 
     if (!accessCodeRecord) {
       return res.status(404).json({
@@ -263,7 +264,7 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
       });
     }
 
-    // Check if it's an assigned code and verify email - UPDATED LOGIC
+    // Check if it's an assigned code and verify email
     if (accessCodeRecord.codeType === 'assigned' && accessCodeRecord.assignedEmail) {
       if (accessCodeRecord.assignedEmail.toLowerCase() !== userEmail.trim().toLowerCase()) {
         return res.status(400).json({
@@ -286,7 +287,7 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
       await user.save();
     }
 
-    // Mark as used (will assign email to generic codes) - UPDATED
+    // Mark as used
     await accessCodeRecord.markAsUsed(user._id, userEmail.trim().toLowerCase());
 
     res.json({
