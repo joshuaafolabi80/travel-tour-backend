@@ -1,4 +1,4 @@
-// travel-tour-backend/models/AccessCode.js - COMPLETE UNCHANGED
+// travel-tour-backend/models/AccessCode.js - COMPLETELY UPDATED
 const mongoose = require('mongoose');
 
 const accessCodeSchema = new mongoose.Schema({
@@ -40,18 +40,17 @@ const accessCodeSchema = new mongoose.Schema({
     type: Date,
     required: true,
     default: function() {
-      // Set to 100 years from now for "lifetime" access
       const hundredYearsFromNow = new Date();
       hundredYearsFromNow.setFullYear(hundredYearsFromNow.getFullYear() + 100);
       return hundredYearsFromNow;
     }
   },
-  // NEW FIELD: User email this code is assigned to
+  // NEW FIELD: User email this code is assigned to (OPTIONAL for admin uploads)
   assignedEmail: {
     type: String,
-    required: true,
     lowercase: true,
-    trim: true
+    trim: true,
+    default: null // Changed from required to optional
   },
   // NEW FIELD: Maximum usage count (default 1 for single use)
   maxUsageCount: {
@@ -62,6 +61,12 @@ const accessCodeSchema = new mongoose.Schema({
   currentUsageCount: {
     type: Number,
     default: 0
+  },
+  // NEW FIELD: Type of access code
+  codeType: {
+    type: String,
+    enum: ['generic', 'assigned'],
+    default: 'generic'
   }
 }, {
   timestamps: true
@@ -75,6 +80,7 @@ accessCodeSchema.index({ usedBy: 1 });
 accessCodeSchema.index({ generatedBy: 1 });
 // NEW INDEX: For email-based lookup
 accessCodeSchema.index({ assignedEmail: 1 });
+accessCodeSchema.index({ codeType: 1 });
 
 // Method to check if access code is valid
 accessCodeSchema.methods.isValid = function() {
@@ -85,11 +91,19 @@ accessCodeSchema.methods.isValid = function() {
   return notExpired && notMaxedOut;
 };
 
-// Method to mark as used
+// Method to mark as used - UPDATED to handle both generic and assigned codes
 accessCodeSchema.methods.markAsUsed = function(userId, email) {
-  // Verify email matches if provided
-  if (email && this.assignedEmail && this.assignedEmail.toLowerCase() !== email.toLowerCase()) {
-    throw new Error('Access code not assigned to this email');
+  // For assigned codes, verify email matches if provided
+  if (this.codeType === 'assigned' && email && this.assignedEmail) {
+    if (this.assignedEmail.toLowerCase() !== email.toLowerCase()) {
+      throw new Error('Access code not assigned to this email');
+    }
+  }
+  
+  // For generic codes (admin uploaded courses), assign the email on first use
+  if (this.codeType === 'generic' && email && !this.assignedEmail) {
+    this.assignedEmail = email.toLowerCase();
+    this.codeType = 'assigned'; // Convert to assigned after first use
   }
   
   this.currentUsageCount += 1;
@@ -116,7 +130,6 @@ accessCodeSchema.statics.generateUniqueCode = async function() {
       code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     
-    // Check if code already exists
     const existingCode = await this.findOne({ code });
     if (!existingCode) {
       isUnique = true;
@@ -134,9 +147,15 @@ accessCodeSchema.statics.findValidCode = function(code, email = null) {
     currentUsageCount: { $lt: '$maxUsageCount' }
   };
   
-  // If email provided, verify it matches assigned email
+  // If email provided, handle both generic and assigned codes
   if (email) {
-    query.assignedEmail = email.toLowerCase();
+    query.$or = [
+      { assignedEmail: email.toLowerCase() },
+      { 
+        codeType: 'generic',
+        assignedEmail: null
+      }
+    ];
   }
   
   return this.findOne(query)
@@ -144,13 +163,13 @@ accessCodeSchema.statics.findValidCode = function(code, email = null) {
     .populate('generatedBy', 'username email');
 };
 
-// Static method to create access code with email assignment
-accessCodeSchema.statics.createAccessCode = async function(data) {
+// Static method to create generic access code (for admin uploads)
+accessCodeSchema.statics.createGenericAccessCode = async function(data) {
   const {
     courseId,
     courseType = 'document',
     generatedBy,
-    assignedEmail,
+    assignedEmail = null, // Optional for admin uploads
     maxUsageCount = 1,
     expiresAt = null
   } = data;
@@ -162,9 +181,42 @@ accessCodeSchema.statics.createAccessCode = async function(data) {
     courseId,
     courseType,
     generatedBy,
+    assignedEmail: assignedEmail ? assignedEmail.toLowerCase().trim() : null,
+    maxUsageCount,
+    codeType: assignedEmail ? 'assigned' : 'generic',
+    expiresAt: expiresAt || new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000)
+  });
+  
+  await accessCode.save();
+  return accessCode;
+};
+
+// Static method to create assigned access code with email requirement
+accessCodeSchema.statics.createAssignedAccessCode = async function(data) {
+  const {
+    courseId,
+    courseType = 'document',
+    generatedBy,
+    assignedEmail, // REQUIRED for assigned codes
+    maxUsageCount = 1,
+    expiresAt = null
+  } = data;
+  
+  if (!assignedEmail) {
+    throw new Error('assignedEmail is required for assigned access codes');
+  }
+  
+  const code = await this.generateUniqueCode();
+  
+  const accessCode = new this({
+    code,
+    courseId,
+    courseType,
+    generatedBy,
     assignedEmail: assignedEmail.toLowerCase().trim(),
     maxUsageCount,
-    expiresAt: expiresAt || new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000) // 100 years
+    codeType: 'assigned',
+    expiresAt: expiresAt || new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000)
   });
   
   await accessCode.save();
@@ -173,9 +225,34 @@ accessCodeSchema.statics.createAccessCode = async function(data) {
 
 // Static method to get access codes by assigned email
 accessCodeSchema.statics.findByAssignedEmail = function(email) {
-  return this.find({ assignedEmail: email.toLowerCase() })
+  return this.find({ 
+    $or: [
+      { assignedEmail: email.toLowerCase() },
+      { 
+        codeType: 'generic',
+        assignedEmail: null
+      }
+    ]
+  })
     .populate('courseId', 'title courseType')
     .populate('usedBy', 'username email')
+    .populate('generatedBy', 'username email')
+    .sort({ createdAt: -1 });
+};
+
+// Static method to find generic codes (no email assigned)
+accessCodeSchema.statics.findGenericCodes = function(courseId = null) {
+  const query = { 
+    codeType: 'generic',
+    assignedEmail: null
+  };
+  
+  if (courseId) {
+    query.courseId = courseId;
+  }
+  
+  return this.find(query)
+    .populate('courseId', 'title courseType')
     .populate('generatedBy', 'username email')
     .sort({ createdAt: -1 });
 };

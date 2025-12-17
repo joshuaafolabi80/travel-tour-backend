@@ -1,5 +1,4 @@
-// travel-tour-backend/routes/admin.js
-
+// travel-tour-backend/routes/admin.js - COMPLETELY UPDATED
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
@@ -25,7 +24,6 @@ const authMiddleware = async (req, res, next) => {
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Verify user exists and is active
     const user = await User.findById(decoded.id);
     if (!user || !user.active) {
       return res.status(401).json({ success: false, message: 'User not found or inactive' });
@@ -56,7 +54,7 @@ const createTransporter = () => {
   });
 };
 
-// Configure multer for file uploads (UPDATED for images too)
+// Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = 'uploads/courses/';
@@ -74,7 +72,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 50 * 1024 * 1024 // Increased to 50MB for documents with images
+    fileSize: 50 * 1024 * 1024
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['.doc', '.docx', '.txt', '.pdf'];
@@ -93,7 +91,6 @@ async function updateCourseNotificationCounts(courseType, isDecrement = false) {
     const countField = courseType === 'general' ? 'generalCoursesCount' : 'masterclassCoursesCount';
     const updateOperation = isDecrement ? -1 : 1;
 
-    // Update all users' notification counts
     await User.updateMany(
       {},
       { $inc: { [countField]: updateOperation } }
@@ -123,7 +120,7 @@ async function updateStudentNotificationCount(studentId) {
     
     await User.findByIdAndUpdate(studentId, { 
       unreadMessages: unreadCount,
-      adminMessageCount: unreadCount // Keep both fields in sync
+      adminMessageCount: unreadCount
     });
   } catch (error) {
     console.error('Error updating notification count:', error);
@@ -132,10 +129,19 @@ async function updateStudentNotificationCount(studentId) {
 
 // ===== COURSE MANAGEMENT ROUTES =====
 
-// Upload document course (UPDATED to handle file storage properly)
+// Upload document course - FIXED TO HANDLE GENERIC ACCESS CODES
 router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, upload.single('courseFile'), async (req, res) => {
   try {
-    const { title, description, courseType, accessCode } = req.body;
+    const { title, description, courseType, accessCode, accessCodeEmail, maxUsageCount = 1 } = req.body;
+    
+    console.log('📤 Uploading document course:', {
+      title,
+      courseType,
+      hasAccessCode: !!accessCode,
+      accessCodeEmail,
+      maxUsageCount,
+      hasFile: !!req.file
+    });
     
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Course file is required' });
@@ -143,6 +149,19 @@ router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, up
 
     if (!title || !description || !courseType) {
       return res.status(400).json({ success: false, message: 'Title, description, and course type are required' });
+    }
+
+    // If masterclass course, access code is required
+    if (courseType === 'masterclass' && !accessCode) {
+      return res.status(400).json({ success: false, message: 'Access code is required for masterclass courses' });
+    }
+
+    // If email is provided with access code, validate it
+    if (accessCodeEmail) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(accessCodeEmail.trim())) {
+        return res.status(400).json({ success: false, message: 'Please provide a valid email address for the access code' });
+      }
     }
 
     // Store the file path instead of reading content for non-text files
@@ -174,7 +193,6 @@ router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, up
         storeOriginalFile = true;
         
         console.log('✅ Document converted to HTML, length:', htmlContent.length);
-        console.log('📝 Conversion messages:', htmlResult.messages);
         
       } catch (conversionError) {
         console.error('Error converting document:', conversionError);
@@ -209,14 +227,28 @@ router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, up
 
     // If masterclass course and access code provided, create access code record
     if (courseType === 'masterclass' && accessCode) {
-      const accessCodeRecord = new AccessCode({
-        code: accessCode,
-        courseId: course._id,
-        courseType: 'document',
-        generatedBy: req.user._id,
-        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
-      });
-      await accessCodeRecord.save();
+      try {
+        const accessCodeData = {
+          code: accessCode,
+          courseId: course._id,
+          courseType: 'document',
+          generatedBy: req.user._id,
+          maxUsageCount: parseInt(maxUsageCount) || 1
+        };
+        
+        // If email is provided, create assigned code, otherwise create generic code
+        if (accessCodeEmail) {
+          accessCodeData.assignedEmail = accessCodeEmail.trim().toLowerCase();
+          await AccessCode.createAssignedAccessCode(accessCodeData);
+          console.log(`✅ Created ASSIGNED access code for email: ${accessCodeEmail}`);
+        } else {
+          await AccessCode.createGenericAccessCode(accessCodeData);
+          console.log(`✅ Created GENERIC access code (no email assigned)`);
+        }
+      } catch (codeError) {
+        console.error('❌ Error creating access code:', codeError);
+        // Continue with course upload even if access code creation fails
+      }
     }
 
     // Update notification counts for all users
@@ -231,25 +263,39 @@ router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, up
         courseType: course.courseType,
         fileName: course.fileName,
         hasImages: htmlContent.includes('<img') || htmlContent.includes('image'),
-        htmlContentLength: htmlContent.length
+        htmlContentLength: htmlContent.length,
+        accessCode: courseType === 'masterclass' ? accessCode : null,
+        hasEmailAssigned: !!accessCodeEmail
       }
     });
 
   } catch (error) {
-    console.error('Error uploading document course:', error);
+    console.error('❌ Error uploading document course:', error);
     
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
     
-    res.status(500).json({ success: false, message: 'Error uploading document course' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error uploading document course',
+      error: error.message 
+    });
   }
 });
 
-// Upload course (compatible with frontend - UPDATED)
+// Upload course (compatible with frontend) - FIXED
 router.post('/admin/upload-course', authMiddleware, adminMiddleware, upload.single('courseFile'), async (req, res) => {
   try {
-    const { title, description, courseType, accessCode } = req.body;
+    const { title, description, courseType, accessCode, accessCodeEmail, maxUsageCount = 1 } = req.body;
+    
+    console.log('📤 Uploading course (compatible route):', {
+      title,
+      courseType,
+      hasAccessCode: !!accessCode,
+      accessCodeEmail,
+      maxUsageCount
+    });
     
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Course file is required' });
@@ -257,6 +303,19 @@ router.post('/admin/upload-course', authMiddleware, adminMiddleware, upload.sing
 
     if (!title || !description || !courseType) {
       return res.status(400).json({ success: false, message: 'Title, description, and course type are required' });
+    }
+
+    // If masterclass course, access code is required
+    if (courseType === 'masterclass' && !accessCode) {
+      return res.status(400).json({ success: false, message: 'Access code is required for masterclass courses' });
+    }
+
+    // If email is provided with access code, validate it
+    if (accessCodeEmail) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(accessCodeEmail.trim())) {
+        return res.status(400).json({ success: false, message: 'Please provide a valid email address for the access code' });
+      }
     }
 
     // Store the file path instead of reading content for non-text files
@@ -288,7 +347,6 @@ router.post('/admin/upload-course', authMiddleware, adminMiddleware, upload.sing
         storeOriginalFile = true;
         
         console.log('✅ Document converted to HTML, length:', htmlContent.length);
-        console.log('📝 Conversion messages:', htmlResult.messages);
         
       } catch (conversionError) {
         console.error('Error converting document:', conversionError);
@@ -323,14 +381,27 @@ router.post('/admin/upload-course', authMiddleware, adminMiddleware, upload.sing
 
     // If masterclass course and access code provided, create access code record
     if (courseType === 'masterclass' && accessCode) {
-      const accessCodeRecord = new AccessCode({
-        code: accessCode,
-        courseId: course._id,
-        courseType: 'document',
-        generatedBy: req.user._id,
-        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
-      });
-      await accessCodeRecord.save();
+      try {
+        const accessCodeData = {
+          code: accessCode,
+          courseId: course._id,
+          courseType: 'document',
+          generatedBy: req.user._id,
+          maxUsageCount: parseInt(maxUsageCount) || 1
+        };
+        
+        // If email is provided, create assigned code, otherwise create generic code
+        if (accessCodeEmail) {
+          accessCodeData.assignedEmail = accessCodeEmail.trim().toLowerCase();
+          await AccessCode.createAssignedAccessCode(accessCodeData);
+          console.log(`✅ Created ASSIGNED access code for email: ${accessCodeEmail}`);
+        } else {
+          await AccessCode.createGenericAccessCode(accessCodeData);
+          console.log(`✅ Created GENERIC access code (no email assigned)`);
+        }
+      } catch (codeError) {
+        console.error('❌ Error creating access code:', codeError);
+      }
     }
 
     // Update notification counts for all users
@@ -350,20 +421,24 @@ router.post('/admin/upload-course', authMiddleware, adminMiddleware, upload.sing
     });
 
   } catch (error) {
-    console.error('Error uploading course:', error);
+    console.error('❌ Error uploading course:', error);
     
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
     
-    res.status(500).json({ success: false, message: 'Error uploading course' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error uploading course',
+      error: error.message 
+    });
   }
 });
 
-// Convert destination to masterclass course
+// Convert destination to masterclass course - FIXED
 router.post('/admin/convert-to-masterclass/:courseId', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { accessCode } = req.body;
+    const { accessCode, accessCodeEmail, maxUsageCount = 1 } = req.body;
     const courseId = req.params.courseId;
 
     const course = await Course.findById(courseId);
@@ -371,21 +446,44 @@ router.post('/admin/convert-to-masterclass/:courseId', authMiddleware, adminMidd
       return res.status(404).json({ success: false, message: 'Course not found' });
     }
 
+    if (!accessCode) {
+      return res.status(400).json({ success: false, message: 'Access code is required for masterclass conversion' });
+    }
+
+    // If email is provided with access code, validate it
+    if (accessCodeEmail) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(accessCodeEmail.trim())) {
+        return res.status(400).json({ success: false, message: 'Please provide a valid email address for the access code' });
+      }
+    }
+
     // Convert to masterclass
     course.courseType = 'masterclass';
     course.accessCode = accessCode || null;
     await course.save();
 
-    // Create access code record if provided
-    if (accessCode) {
-      const accessCodeRecord = new AccessCode({
+    // Create access code record
+    try {
+      const accessCodeData = {
         code: accessCode,
         courseId: course._id,
         courseType: 'destination',
         generatedBy: req.user._id,
-        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
-      });
-      await accessCodeRecord.save();
+        maxUsageCount: parseInt(maxUsageCount) || 1
+      };
+      
+      // If email is provided, create assigned code, otherwise create generic code
+      if (accessCodeEmail) {
+        accessCodeData.assignedEmail = accessCodeEmail.trim().toLowerCase();
+        await AccessCode.createAssignedAccessCode(accessCodeData);
+        console.log(`✅ Created ASSIGNED access code for email: ${accessCodeEmail}`);
+      } else {
+        await AccessCode.createGenericAccessCode(accessCodeData);
+        console.log(`✅ Created GENERIC access code (no email assigned)`);
+      }
+    } catch (codeError) {
+      console.error('❌ Error creating access code:', codeError);
     }
 
     // Update notification counts
@@ -398,7 +496,7 @@ router.post('/admin/convert-to-masterclass/:courseId', authMiddleware, adminMidd
     });
 
   } catch (error) {
-    console.error('Error converting course:', error);
+    console.error('❌ Error converting course:', error);
     res.status(500).json({ success: false, message: 'Error converting course' });
   }
 });
@@ -549,7 +647,7 @@ router.put('/admin/courses/:id', authMiddleware, adminMiddleware, async (req, re
   }
 });
 
-// Delete course (UPDATED to handle file cleanup)
+// Delete course
 router.delete('/admin/courses/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     let course = await Course.findById(req.params.id);
@@ -570,7 +668,6 @@ router.delete('/admin/courses/:id', authMiddleware, adminMiddleware, async (req,
         fs.unlinkSync(course.filePath);
       } catch (fileError) {
         console.error('Error deleting course file:', fileError);
-        // Continue with course deletion even if file deletion fails
       }
     }
 
@@ -599,7 +696,7 @@ router.delete('/admin/courses/:id', authMiddleware, adminMiddleware, async (req,
   }
 });
 
-// Generate access code for masterclass course
+// Generate access code for masterclass course - UPDATED
 router.post('/admin/courses/:id/generate-access-code', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     let course = await Course.findById(req.params.id);
@@ -626,6 +723,7 @@ router.post('/admin/courses/:id/generate-access-code', authMiddleware, adminMidd
       courseId: course._id,
       courseType: courseType,
       generatedBy: req.user._id,
+      codeType: 'generic',
       expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
     });
 
@@ -633,8 +731,9 @@ router.post('/admin/courses/:id/generate-access-code', authMiddleware, adminMidd
 
     res.json({
       success: true,
-      message: 'Access code generated successfully',
-      accessCode: accessCodeRecord.code
+      message: 'Generic access code generated successfully',
+      accessCode: accessCodeRecord.code,
+      codeType: 'generic'
     });
   } catch (error) {
     console.error('Error generating access code:', error);
@@ -644,7 +743,7 @@ router.post('/admin/courses/:id/generate-access-code', authMiddleware, adminMidd
 
 // ===== ACCESS CODE MANAGEMENT ROUTES =====
 
-// Generate access code for specific user
+// Generate access code for specific user - UPDATED
 router.post('/admin/courses/:id/generate-access-code-for-user', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const courseId = req.params.id;
@@ -653,7 +752,7 @@ router.post('/admin/courses/:id/generate-access-code-for-user', authMiddleware, 
     if (!userEmail) {
       return res.status(400).json({
         success: false,
-        message: 'User email is required'
+        message: 'User email is required for assigned access codes'
       });
     }
 
@@ -682,7 +781,7 @@ router.post('/admin/courses/:id/generate-access-code-for-user', authMiddleware, 
     // Generate unique access code using the existing helper function
     const accessCode = generateAccessCode();
     
-    const accessCodeRecord = new AccessCode({
+    const accessCodeRecord = await AccessCode.createAssignedAccessCode({
       code: accessCode,
       courseId: course._id,
       courseType: course.courseType === 'masterclass' ? 'document' : 'destination',
@@ -693,13 +792,12 @@ router.post('/admin/courses/:id/generate-access-code-for-user', authMiddleware, 
       expiresAt: lifetimeAccess ? new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
     });
 
-    await accessCodeRecord.save();
-
     res.json({
       success: true,
-      message: 'Access code generated successfully',
+      message: 'Assigned access code generated successfully',
       accessCode: accessCodeRecord.code,
-      userEmail: userEmail.trim()
+      userEmail: userEmail.trim(),
+      codeType: 'assigned'
     });
   } catch (error) {
     console.error('Error generating access code for user:', error);
@@ -851,7 +949,7 @@ router.get('/admin/students/:id', authMiddleware, adminMiddleware, async (req, r
   }
 });
 
-// FIXED: Send message to student with proper error handling
+// Send message to student
 router.post('/admin/send-message', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     console.log('📨 ADMIN: Sending message to student', req.body);
@@ -925,7 +1023,6 @@ router.post('/admin/send-message', authMiddleware, adminMiddleware, async (req, 
         console.log(`✅ Email sent successfully to ${studentEmail || student.email}`);
       } catch (emailError) {
         console.error('❌ Error sending email:', emailError);
-        // Don't fail the entire request if email fails
       }
     }
 
@@ -1021,7 +1118,6 @@ router.post('/send-message', authMiddleware, adminMiddleware, async (req, res) =
         console.log(`Email sent successfully to ${studentEmail || student.email}`);
       } catch (emailError) {
         console.error('Error sending email:', emailError);
-        // Don't fail the entire request if email fails
       }
     }
 
@@ -1036,7 +1132,7 @@ router.post('/send-message', authMiddleware, adminMiddleware, async (req, res) =
   }
 });
 
-// Get messages for a student (for the user's "Message from Admin" tab)
+// Get messages for a student
 router.get('/messages/:userId', authMiddleware, async (req, res) => {
   try {
     // Allow students to view their own messages or admins to view any messages
@@ -1083,7 +1179,7 @@ router.put('/messages/mark-read', authMiddleware, async (req, res) => {
       $set: { adminMessageCount: 0 }
     });
 
-    // Also update unread messages count using your existing system
+    // Also update unread messages count
     await updateStudentNotificationCount(userId);
     
     res.json({ success: true, message: 'Messages marked as read' });
@@ -1200,7 +1296,6 @@ router.get('/admin/messages-from-students', authMiddleware, adminMiddleware, asy
       case 'replied':
         query.reply = { $exists: true };
         break;
-      // 'all' - no additional filters
     }
 
     const messages = await Message.find(query)
@@ -1413,7 +1508,7 @@ router.post('/admin/generate-access-code', authMiddleware, adminMiddleware, asyn
       studentId: studentId,
       courseType: course?.courseType || 'masterclass',
       generatedBy: req.user._id,
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 1 year
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
     });
 
     await accessCodeRecord.save();

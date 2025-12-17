@@ -1,4 +1,4 @@
-// travel-tour-backend/routes/courses.js
+// travel-tour-backend/routes/courses.js - COMPLETE UNBRIDGED UPDATED
 const express = require('express');
 const mongoose = require('mongoose');
 const DocumentCourse = require('../models/DocumentCourse');
@@ -84,9 +84,9 @@ router.get('/courses/notification-counts', authMiddleware, async (req, res) => {
   }
 });
 
-// ===== NEW ACCESS CODE VALIDATION ROUTES =====
+// ===== UPDATED ACCESS CODE VALIDATION ROUTES =====
 
-// Validate masterclass access code with email
+// Validate masterclass access code with email - UPDATED FOR GENERIC/ASSIGNED CODES
 router.post('/courses/validate-masterclass-access', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
@@ -107,16 +107,15 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
       });
     }
 
-    // Find the access code
+    // Find the access code - UPDATED: No longer requires assignedEmail in query
     const accessCodeRecord = await AccessCode.findOne({ 
-      code: accessCode.trim().toUpperCase(),
-      assignedEmail: userEmail.trim().toLowerCase()
+      code: accessCode.trim().toUpperCase()
     }).populate('courseId');
 
     if (!accessCodeRecord) {
       return res.status(404).json({
         success: false,
-        message: 'Access code not found or not assigned to this email'
+        message: 'Access code not found'
       });
     }
 
@@ -126,6 +125,16 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
         success: false,
         message: 'Access code is no longer valid (expired or max usage reached)'
       });
+    }
+
+    // Check if it's an assigned code and verify email - UPDATED LOGIC
+    if (accessCodeRecord.codeType === 'assigned' && accessCodeRecord.assignedEmail) {
+      if (accessCodeRecord.assignedEmail.toLowerCase() !== userEmail.trim().toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          message: 'This access code is assigned to a different email address'
+        });
+      }
     }
 
     // Check if user exists
@@ -141,15 +150,23 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
       await user.save();
     }
 
-    // Mark as used
+    // Mark as used (will assign email to generic codes) - UPDATED
     await accessCodeRecord.markAsUsed(user._id, userEmail.trim().toLowerCase());
+
+    // Add course to user's accessible masterclass courses if not already there
+    if (accessCodeRecord.courseId) {
+      await User.findByIdAndUpdate(user._id, {
+        $addToSet: { accessibleMasterclassCourses: accessCodeRecord.courseId._id }
+      });
+    }
 
     res.json({
       success: true,
       message: 'Access granted to masterclass courses',
       access: true,
       userName: user.username,
-      courseTitle: accessCodeRecord.courseId?.title || 'Masterclass Course'
+      courseTitle: accessCodeRecord.courseId?.title || 'Masterclass Course',
+      codeType: accessCodeRecord.codeType
     });
 
   } catch (error) {
@@ -162,7 +179,7 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
   }
 });
 
-// Validate masterclass video access code with email
+// Validate masterclass video access code with email - UPDATED FOR GENERIC/ASSIGNED CODES
 router.post('/videos/validate-masterclass-access', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
@@ -183,18 +200,16 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
       });
     }
 
-    // Find the access code (for videos, we might need a different approach)
-    // For now, we'll use the same AccessCode model but check if it's for videos
+    // Find the access code - UPDATED: No longer requires assignedEmail in query
     const accessCodeRecord = await AccessCode.findOne({ 
       code: accessCode.trim().toUpperCase(),
-      assignedEmail: userEmail.trim().toLowerCase(),
       courseType: 'document' // Assuming videos use document type
     });
 
     if (!accessCodeRecord) {
       return res.status(404).json({
         success: false,
-        message: 'Access code not found or not assigned to this email'
+        message: 'Access code not found'
       });
     }
 
@@ -204,6 +219,16 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
         success: false,
         message: 'Access code is no longer valid (expired or max usage reached)'
       });
+    }
+
+    // Check if it's an assigned code and verify email - UPDATED LOGIC
+    if (accessCodeRecord.codeType === 'assigned' && accessCodeRecord.assignedEmail) {
+      if (accessCodeRecord.assignedEmail.toLowerCase() !== userEmail.trim().toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          message: 'This access code is assigned to a different email address'
+        });
+      }
     }
 
     // Check if user exists
@@ -219,7 +244,7 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
       await user.save();
     }
 
-    // Mark as used
+    // Mark as used (will assign email to generic codes) - UPDATED
     await accessCodeRecord.markAsUsed(user._id, userEmail.trim().toLowerCase());
 
     res.json({
@@ -432,6 +457,350 @@ router.get('/courses/:id', authMiddleware, async (req, res) => {
       success: false, 
       message: 'Error fetching course details',
       error: error.message 
+    });
+  }
+});
+
+// ===== ADDITIONAL ACCESS CODE ROUTES FOR FRONTEND =====
+
+// Get user's access codes by email
+router.get('/courses/user-access-codes/:email', async (req, res) => {
+  try {
+    const userEmail = req.params.email;
+    
+    if (!userEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email address is required'
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(userEmail.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid email address'
+      });
+    }
+
+    // Find all access codes for this email (both assigned and generic that became assigned)
+    const accessCodes = await AccessCode.find({
+      $or: [
+        { assignedEmail: userEmail.trim().toLowerCase() },
+        { 
+          codeType: 'generic',
+          'usedBy.email': userEmail.trim().toLowerCase()
+        }
+      ]
+    })
+    .populate('courseId', 'title description courseType')
+    .populate('generatedBy', 'username email')
+    .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      accessCodes: accessCodes,
+      totalCount: accessCodes.length,
+      message: 'Access codes retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching user access codes:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching access codes',
+      error: error.message
+    });
+  }
+});
+
+// Check if user has access to specific course
+router.post('/courses/check-course-access', async (req, res) => {
+  try {
+    const { userEmail, courseId } = req.body;
+    
+    if (!userEmail || !courseId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email address and course ID are required'
+      });
+    }
+
+    // Check if user has access via access codes
+    const accessCode = await AccessCode.findOne({
+      $or: [
+        { 
+          assignedEmail: userEmail.trim().toLowerCase(),
+          courseId: courseId,
+          isUsed: true
+        },
+        {
+          'usedBy.email': userEmail.trim().toLowerCase(),
+          courseId: courseId,
+          isUsed: true
+        }
+      ]
+    });
+
+    // Also check if user already has course in accessibleMasterclassCourses
+    const user = await User.findOne({ 
+      email: userEmail.trim().toLowerCase()
+    }).select('accessibleMasterclassCourses');
+
+    let hasAccess = false;
+    let accessMethod = 'none';
+
+    if (accessCode) {
+      hasAccess = true;
+      accessMethod = 'access_code';
+    } else if (user && user.accessibleMasterclassCourses && 
+               user.accessibleMasterclassCourses.includes(new mongoose.Types.ObjectId(courseId))) {
+      hasAccess = true;
+      accessMethod = 'user_record';
+    }
+
+    res.json({
+      success: true,
+      hasAccess: hasAccess,
+      accessMethod: accessMethod,
+      message: hasAccess ? 'User has access to this course' : 'User does not have access to this course'
+    });
+
+  } catch (error) {
+    console.error('Error checking course access:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error checking course access',
+      error: error.message
+    });
+  }
+});
+
+// Get all generic (unassigned) access codes for admin
+router.get('/courses/generic-access-codes', authMiddleware, async (req, res) => {
+  try {
+    // Only admins can access this
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin only.'
+      });
+    }
+
+    const genericCodes = await AccessCode.find({
+      codeType: 'generic',
+      assignedEmail: null,
+      isUsed: false
+    })
+    .populate('courseId', 'title courseType')
+    .populate('generatedBy', 'username email')
+    .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      genericCodes: genericCodes,
+      totalCount: genericCodes.length,
+      message: 'Generic access codes retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching generic access codes:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching generic access codes',
+      error: error.message
+    });
+  }
+});
+
+// Assign a generic access code to a specific user
+router.post('/courses/assign-generic-code', authMiddleware, async (req, res) => {
+  try {
+    // Only admins can access this
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin only.'
+      });
+    }
+
+    const { accessCodeId, userEmail, userName } = req.body;
+    
+    if (!accessCodeId || !userEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Access code ID and user email are required'
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(userEmail.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid email address'
+      });
+    }
+
+    // Find the generic access code
+    const accessCode = await AccessCode.findOne({
+      _id: accessCodeId,
+      codeType: 'generic',
+      assignedEmail: null,
+      isUsed: false
+    });
+
+    if (!accessCode) {
+      return res.status(404).json({
+        success: false,
+        message: 'Generic access code not found or already assigned'
+      });
+    }
+
+    // Check if email already has an assigned code for this course
+    const existingAssignedCode = await AccessCode.findOne({
+      courseId: accessCode.courseId,
+      assignedEmail: userEmail.trim().toLowerCase(),
+      codeType: 'assigned'
+    });
+
+    if (existingAssignedCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'This email already has an assigned access code for this course'
+      });
+    }
+
+    // Assign the code
+    accessCode.assignedEmail = userEmail.trim().toLowerCase();
+    accessCode.codeType = 'assigned';
+    if (userName) {
+      accessCode.assignedUserName = userName.trim();
+    }
+    await accessCode.save();
+
+    res.json({
+      success: true,
+      message: 'Access code successfully assigned to user',
+      accessCode: {
+        code: accessCode.code,
+        assignedEmail: accessCode.assignedEmail,
+        assignedUserName: accessCode.assignedUserName,
+        courseId: accessCode.courseId
+      }
+    });
+
+  } catch (error) {
+    console.error('Error assigning generic access code:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error assigning access code',
+      error: error.message
+    });
+  }
+});
+
+// Get course access statistics for admin
+router.get('/courses/access-statistics/:courseId', authMiddleware, async (req, res) => {
+  try {
+    // Only admins can access this
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin only.'
+      });
+    }
+
+    const courseId = req.params.courseId;
+    
+    // Get total access codes for this course
+    const totalCodes = await AccessCode.countDocuments({ courseId: courseId });
+    
+    // Get assigned codes
+    const assignedCodes = await AccessCode.countDocuments({ 
+      courseId: courseId,
+      codeType: 'assigned'
+    });
+    
+    // Get generic codes
+    const genericCodes = await AccessCode.countDocuments({ 
+      courseId: courseId,
+      codeType: 'generic'
+    });
+    
+    // Get used codes
+    const usedCodes = await AccessCode.countDocuments({ 
+      courseId: courseId,
+      isUsed: true
+    });
+    
+    // Get unused codes
+    const unusedCodes = await AccessCode.countDocuments({ 
+      courseId: courseId,
+      isUsed: false
+    });
+    
+    // Get unique users who have accessed this course
+    const uniqueUsers = await AccessCode.distinct('assignedEmail', { 
+      courseId: courseId,
+      assignedEmail: { $ne: null }
+    });
+
+    res.json({
+      success: true,
+      statistics: {
+        totalCodes: totalCodes,
+        assignedCodes: assignedCodes,
+        genericCodes: genericCodes,
+        usedCodes: usedCodes,
+        unusedCodes: unusedCodes,
+        uniqueUsers: uniqueUsers.length,
+        usageRate: totalCodes > 0 ? (usedCodes / totalCodes * 100).toFixed(2) + '%' : '0%'
+      },
+      message: 'Access statistics retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching access statistics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching access statistics',
+      error: error.message
+    });
+  }
+});
+
+// Health check endpoint for courses module
+router.get('/courses/health', async (req, res) => {
+  try {
+    // Check database connections
+    const coursesCount = await DocumentCourse.countDocuments({ isActive: true });
+    const activeCoursesCount = await DocumentCourse.countDocuments({ isActive: true });
+    const accessCodesCount = await AccessCode.countDocuments({});
+    
+    res.json({
+      success: true,
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      counts: {
+        totalCourses: coursesCount,
+        activeCourses: activeCoursesCount,
+        accessCodes: accessCodesCount
+      },
+      modules: {
+        accessCodeValidation: 'operational',
+        courseFetching: 'operational',
+        notificationCounts: 'operational'
+      }
+    });
+  } catch (error) {
+    console.error('Courses health check error:', error);
+    res.status(500).json({
+      success: false,
+      status: 'unhealthy',
+      message: 'Courses module health check failed',
+      error: error.message
     });
   }
 });
