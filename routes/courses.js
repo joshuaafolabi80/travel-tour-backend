@@ -26,9 +26,67 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
-// ===== TEST ENDPOINT - ADDED FOR DEBUGGING =====
+// 🚨 CRITICAL: SPECIFIC ROUTES MUST COME BEFORE PARAMETERIZED ROUTES
 
-// Direct test endpoint for access code debugging
+// Notification counts route - MUST BE FIRST
+router.get('/courses/notification-counts', authMiddleware, async (req, res) => {
+  try {
+    console.log('🔔 Fetching notification counts for user:', req.user._id);
+    
+    const user = await User.findById(req.user._id);
+    
+    // Get counts for general and masterclass courses
+    const generalCoursesCount = await DocumentCourse.countDocuments({ 
+      courseType: 'general', 
+      isActive: true 
+    });
+    
+    const masterclassCoursesCount = await DocumentCourse.countDocuments({ 
+      courseType: 'masterclass', 
+      isActive: true,
+      _id: { $in: user.accessibleMasterclassCourses || [] }
+    });
+    
+    res.json({
+      success: true,
+      generalCourses: generalCoursesCount || 0,
+      masterclassCourses: masterclassCoursesCount || 0,
+      counts: {
+        quizScores: 0,
+        courseRemarks: 0,
+        generalCourses: generalCoursesCount || 0,
+        masterclassCourses: masterclassCoursesCount || 0,
+        importantInfo: 0,
+        adminMessages: 0,
+        quizCompleted: 0,
+        courseCompleted: 0,
+        messagesFromStudents: 0
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching notification counts:', error);
+    res.json({
+      success: true,
+      generalCourses: 0,
+      masterclassCourses: 0,
+      counts: {
+        quizScores: 0,
+        courseRemarks: 0,
+        generalCourses: 0,
+        masterclassCourses: 0,
+        importantInfo: 0,
+        adminMessages: 0,
+        quizCompleted: 0,
+        courseCompleted: 0,
+        messagesFromStudents: 0
+      }
+    });
+  }
+});
+
+// ===== TEST ENDPOINT - MOVED TO CORRECT POSITION =====
+
+// Direct test endpoint for access code debugging - MOVED TO AFTER NOTIFICATION COUNTS
 router.post('/courses/test-access-code', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
@@ -139,66 +197,6 @@ router.post('/courses/test-access-code', async (req, res) => {
       success: false,
       message: 'Test error',
       error: error.message
-    });
-  }
-});
-
-// ===== ORIGINAL ROUTES CONTINUE BELOW =====
-
-// 🚨 CRITICAL: SPECIFIC ROUTES MUST COME BEFORE PARAMETERIZED ROUTES
-
-// Notification counts route - MUST BE FIRST
-router.get('/courses/notification-counts', authMiddleware, async (req, res) => {
-  try {
-    console.log('🔔 Fetching notification counts for user:', req.user._id);
-    
-    const user = await User.findById(req.user._id);
-    
-    // Get counts for general and masterclass courses
-    const generalCoursesCount = await DocumentCourse.countDocuments({ 
-      courseType: 'general', 
-      isActive: true 
-    });
-    
-    const masterclassCoursesCount = await DocumentCourse.countDocuments({ 
-      courseType: 'masterclass', 
-      isActive: true,
-      _id: { $in: user.accessibleMasterclassCourses || [] }
-    });
-    
-    res.json({
-      success: true,
-      generalCourses: generalCoursesCount || 0,
-      masterclassCourses: masterclassCoursesCount || 0,
-      counts: {
-        quizScores: 0,
-        courseRemarks: 0,
-        generalCourses: generalCoursesCount || 0,
-        masterclassCourses: masterclassCoursesCount || 0,
-        importantInfo: 0,
-        adminMessages: 0,
-        quizCompleted: 0,
-        courseCompleted: 0,
-        messagesFromStudents: 0
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching notification counts:', error);
-    res.json({
-      success: true,
-      generalCourses: 0,
-      masterclassCourses: 0,
-      counts: {
-        quizScores: 0,
-        courseRemarks: 0,
-        generalCourses: 0,
-        masterclassCourses: 0,
-        importantInfo: 0,
-        adminMessages: 0,
-        quizCompleted: 0,
-        courseCompleted: 0,
-        messagesFromStudents: 0
-      }
     });
   }
 });
@@ -633,70 +631,6 @@ router.get('/courses/debug/morocco', authMiddleware, async (req, res) => {
   }
 });
 
-// 🚨 PARAMETERIZED ROUTES MUST COME LAST
-
-// Get single course by ID or destinationId - THIS COMES LAST (IMPROVED VERSION)
-router.get('/courses/:id', authMiddleware, async (req, res) => {
-  try {
-    const courseId = req.params.id;
-    
-    console.log(`🔍 Looking for course with ID: ${courseId}`);
-    
-    // Skip if this is a special route that should have been caught earlier
-    if (['notification-counts', 'destinations', 'debug', 'validate-masterclass-access', 'validate-masterclass-access-original'].includes(courseId)) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Course not found' 
-      });
-    }
-    
-    let course = null;
-    
-    // 🚨 CRITICAL FIX: First try to find by destinationId (case-insensitive) - IMPROVED LOGIC
-    course = await Course.findOne({ 
-      destinationId: { $regex: new RegExp('^' + courseId + '$', 'i') }
-    });
-    
-    console.log(`🔍 Course found by destinationId:`, course ? `${course.name} (${course.destinationId})` : 'No');
-    
-    // 🚨 CRITICAL FIX: If not found by destinationId, try by ObjectId
-    if (!course && mongoose.Types.ObjectId.isValid(courseId)) {
-      course = await Course.findById(courseId);
-      console.log(`🔍 Course found by ObjectId:`, course ? `${course.name}` : 'No');
-    }
-    
-    // 🚨 CRITICAL FIX: If still not found, try by name (case-insensitive)
-    if (!course) {
-      course = await Course.findOne({ 
-        name: { $regex: new RegExp(courseId, 'i') }
-      });
-      console.log(`🔍 Course found by name:`, course ? `${course.name}` : 'No');
-    }
-    
-    if (!course) {
-      console.log(`❌ Course not found with any method for ID: ${courseId}`);
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Course not found' 
-      });
-    }
-    
-    console.log(`✅ SUCCESS: Course found: ${course.name} (${course.destinationId})`);
-    
-    res.json({ 
-      success: true, 
-      course
-    });
-  } catch (error) {
-    console.error('❌ Error fetching course:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error fetching course details',
-      error: error.message 
-    });
-  }
-});
-
 // ===== ADDITIONAL ACCESS CODE ROUTES FOR FRONTEND =====
 
 // Get user's access codes by email
@@ -1043,6 +977,70 @@ router.get('/courses/health', async (req, res) => {
       status: 'unhealthy',
       message: 'Courses module health check failed',
       error: error.message
+    });
+  }
+});
+
+// 🚨 PARAMETERIZED ROUTES MUST COME LAST
+
+// Get single course by ID or destinationId - THIS COMES LAST (IMPROVED VERSION)
+router.get('/courses/:id', authMiddleware, async (req, res) => {
+  try {
+    const courseId = req.params.id;
+    
+    console.log(`🔍 Looking for course with ID: ${courseId}`);
+    
+    // Skip if this is a special route that should have been caught earlier
+    if (['notification-counts', 'destinations', 'debug', 'validate-masterclass-access', 'validate-masterclass-access-original', 'test-access-code', 'user-access-codes', 'check-course-access', 'generic-access-codes', 'assign-generic-code', 'access-statistics', 'health'].includes(courseId)) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Course not found' 
+      });
+    }
+    
+    let course = null;
+    
+    // 🚨 CRITICAL FIX: First try to find by destinationId (case-insensitive) - IMPROVED LOGIC
+    course = await Course.findOne({ 
+      destinationId: { $regex: new RegExp('^' + courseId + '$', 'i') }
+    });
+    
+    console.log(`🔍 Course found by destinationId:`, course ? `${course.name} (${course.destinationId})` : 'No');
+    
+    // 🚨 CRITICAL FIX: If not found by destinationId, try by ObjectId
+    if (!course && mongoose.Types.ObjectId.isValid(courseId)) {
+      course = await Course.findById(courseId);
+      console.log(`🔍 Course found by ObjectId:`, course ? `${course.name}` : 'No');
+    }
+    
+    // 🚨 CRITICAL FIX: If still not found, try by name (case-insensitive)
+    if (!course) {
+      course = await Course.findOne({ 
+        name: { $regex: new RegExp(courseId, 'i') }
+      });
+      console.log(`🔍 Course found by name:`, course ? `${course.name}` : 'No');
+    }
+    
+    if (!course) {
+      console.log(`❌ Course not found with any method for ID: ${courseId}`);
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Course not found' 
+      });
+    }
+    
+    console.log(`✅ SUCCESS: Course found: ${course.name} (${course.destinationId})`);
+    
+    res.json({ 
+      success: true, 
+      course
+    });
+  } catch (error) {
+    console.error('❌ Error fetching course:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching course details',
+      error: error.message 
     });
   }
 });
