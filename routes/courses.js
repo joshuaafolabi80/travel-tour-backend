@@ -205,121 +205,137 @@ router.get('/courses/notification-counts', authMiddleware, async (req, res) => {
 
 // ===== UPDATED ACCESS CODE VALIDATION ROUTES =====
 
-// Validate masterclass access code with email - UPDATED WITH MANUAL VALIDATION
+// Validate masterclass access code - SIMPLIFIED WORKING VERSION
 router.post('/courses/validate-masterclass-access', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
     
+    console.log('🔐 VALIDATION ATTEMPT:', { 
+      accessCode: accessCode || 'empty', 
+      userEmail: userEmail || 'empty' 
+    });
+    
+    // Basic validation
     if (!accessCode || !userEmail) {
       return res.status(400).json({
         success: false,
-        message: 'Access code and email address are required'
+        message: 'Access code and email are required'
       });
     }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(userEmail.trim())) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide a valid email address'
-      });
-    }
-
-    // Clean the access code
+    
+    // Clean inputs
     const cleanAccessCode = accessCode.trim().toUpperCase();
-
-    // UPDATED: Validate access code length (1-20 characters) - FLEXIBLE
-    if (cleanAccessCode.length < 1) {
-      console.log('❌ Invalid access code length:', cleanAccessCode.length);
-      return res.status(400).json({
-        success: false,
-        message: 'Access code is required'
-      });
-    }
-
-    // Allow any length from 1-20 characters
-    if (cleanAccessCode.length > 20) {
-      console.log('❌ Access code too long:', cleanAccessCode.length);
-      return res.status(400).json({
-        success: false,
-        message: 'Access code must be 20 characters or less'
-      });
-    }
-
-    // 🚨 UPDATED: Use manual validation approach
+    const cleanUserEmail = userEmail.trim().toLowerCase();
+    
+    console.log('🧹 Cleaned:', { cleanAccessCode, cleanUserEmail });
+    
+    // 1. DIRECT DATABASE LOOKUP - SIMPLE
     const accessCodeRecord = await AccessCode.findOne({ 
       code: cleanAccessCode 
-    }).populate('courseId');
-
-    // Then manually validate
+    })
+    .populate('courseId');
+    
+    console.log('🔍 Database lookup result:', accessCodeRecord ? 'FOUND' : 'NOT FOUND');
+    
     if (!accessCodeRecord) {
-      return res.status(404).json({
-        success: false,
-        message: 'Access code not found'
-      });
-    }
-
-    // Check usage limit
-    if (accessCodeRecord.currentUsageCount >= accessCodeRecord.maxUsageCount) {
       return res.status(400).json({
         success: false,
-        message: 'Access code usage limit reached'
+        message: 'Invalid access code'
       });
     }
-
-    // Check expiration
-    if (accessCodeRecord.expiresAt < new Date()) {
+    
+    console.log('📝 Access code details:', {
+      code: accessCodeRecord.code,
+      assignedEmail: accessCodeRecord.assignedEmail,
+      codeType: accessCodeRecord.codeType,
+      currentUsage: accessCodeRecord.currentUsageCount,
+      maxUsage: accessCodeRecord.maxUsageCount,
+      expiresAt: accessCodeRecord.expiresAt,
+      isUsed: accessCodeRecord.isUsed
+    });
+    
+    // 2. CHECK EXPIRATION
+    const now = new Date();
+    if (accessCodeRecord.expiresAt < now) {
+      console.log('❌ Code expired');
       return res.status(400).json({
         success: false,
         message: 'Access code has expired'
       });
     }
-
-    // Email validation for assigned codes
+    
+    // 3. CHECK USAGE
+    if (accessCodeRecord.currentUsageCount >= accessCodeRecord.maxUsageCount) {
+      console.log('❌ Usage limit reached');
+      return res.status(400).json({
+        success: false,
+        message: 'Access code usage limit reached'
+      });
+    }
+    
+    // 4. CHECK EMAIL FOR ASSIGNED CODES
     if (accessCodeRecord.codeType === 'assigned' && accessCodeRecord.assignedEmail) {
-      if (accessCodeRecord.assignedEmail.toLowerCase() !== userEmail.trim().toLowerCase()) {
+      if (accessCodeRecord.assignedEmail.toLowerCase() !== cleanUserEmail) {
+        console.log('❌ Email mismatch for assigned code');
         return res.status(400).json({
           success: false,
           message: 'This access code is assigned to a different email address'
         });
       }
     }
-
-    // Check if user exists
-    let user = await User.findOne({ email: userEmail.trim().toLowerCase() });
+    
+    // 5. FIND OR CREATE USER
+    let user = await User.findOne({ email: cleanUserEmail });
     if (!user) {
-      // Create a temporary user if doesn't exist
       user = new User({
-        email: userEmail.trim().toLowerCase(),
-        username: userEmail.trim().toLowerCase().split('@')[0],
+        email: cleanUserEmail,
+        username: cleanUserEmail.split('@')[0],
         role: 'student',
         active: true
       });
       await user.save();
+      console.log('👤 Created new user');
     }
-
-    // Mark as used (will assign email to generic codes)
-    await accessCodeRecord.markAsUsed(user._id, userEmail.trim().toLowerCase());
-
-    // Add course to user's accessible masterclass courses if not already there
+    
+    // 6. MARK AS USED
+    accessCodeRecord.currentUsageCount += 1;
+    
+    // If reached max usage, mark as used
+    if (accessCodeRecord.currentUsageCount >= accessCodeRecord.maxUsageCount) {
+      accessCodeRecord.isUsed = true;
+      accessCodeRecord.usedBy = user._id;
+      accessCodeRecord.usedAt = new Date();
+    }
+    
+    // If generic code with no email, assign it
+    if (accessCodeRecord.codeType === 'generic' && !accessCodeRecord.assignedEmail) {
+      accessCodeRecord.assignedEmail = cleanUserEmail;
+      accessCodeRecord.codeType = 'assigned';
+    }
+    
+    await accessCodeRecord.save();
+    console.log('✅ Access code marked as used');
+    
+    // 7. ADD COURSE TO USER'S ACCESSIBLE COURSES
     if (accessCodeRecord.courseId) {
       await User.findByIdAndUpdate(user._id, {
         $addToSet: { accessibleMasterclassCourses: accessCodeRecord.courseId._id }
       });
+      console.log('➕ Added course to user accessible courses');
     }
-
+    
+    console.log('🎉 ACCESS GRANTED!');
     res.json({
       success: true,
       message: 'Access granted to masterclass courses',
       access: true,
       userName: user.username,
-      courseTitle: accessCodeRecord.courseId?.title || 'Masterclass Course',
-      codeType: accessCodeRecord.codeType
+      courseTitle: accessCodeRecord.courseId?.title || 'Masterclass Course'
     });
-
+    
   } catch (error) {
-    console.error('Error validating access code:', error);
+    console.error('💥 VALIDATION ERROR:', error.message);
+    console.error(error.stack);
     res.status(500).json({
       success: false,
       message: 'Error validating access code',
