@@ -26,6 +26,125 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
+// ===== TEST ENDPOINT - ADDED FOR DEBUGGING =====
+
+// Direct test endpoint for access code debugging
+router.post('/courses/test-access-code', async (req, res) => {
+  try {
+    const { accessCode, userEmail } = req.body;
+    
+    console.log('🔐 DIRECT TEST REQUEST:', { 
+      accessCode: accessCode || 'empty',
+      userEmail: userEmail || 'empty'
+    });
+    
+    if (!accessCode || !userEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Both access code and email are required'
+      });
+    }
+    
+    // Clean inputs
+    const cleanAccessCode = accessCode.trim().toUpperCase();
+    const cleanUserEmail = userEmail.trim().toLowerCase();
+    
+    console.log('🧹 Cleaned:', { 
+      cleanAccessCode, 
+      cleanUserEmail 
+    });
+    
+    // 1. Direct database query
+    console.log('🔍 Step 1: Direct database query...');
+    const directQuery = await AccessCode.findOne({ 
+      code: cleanAccessCode 
+    })
+    .populate('courseId')
+    .populate('generatedBy', 'username email');
+    
+    console.log('📊 Direct query result:', directQuery ? 'FOUND' : 'NOT FOUND');
+    
+    if (directQuery) {
+      console.log('📝 Access code details:', {
+        code: directQuery.code,
+        assignedEmail: directQuery.assignedEmail,
+        codeType: directQuery.codeType,
+        currentUsage: directQuery.currentUsageCount,
+        maxUsage: directQuery.maxUsageCount,
+        expiresAt: directQuery.expiresAt,
+        isExpired: directQuery.expiresAt < new Date(),
+        isUsed: directQuery.isUsed,
+        isValid: directQuery.isValid()
+      });
+    }
+    
+    // 2. Try findValidCode method
+    console.log('🔍 Step 2: Trying findValidCode method...');
+    const findValidResult = await AccessCode.findValidCode(
+      cleanAccessCode, 
+      cleanUserEmail
+    );
+    
+    console.log('📊 findValidCode result:', findValidResult ? 'VALID' : 'INVALID');
+    
+    // 3. Check if user exists
+    console.log('🔍 Step 3: Checking user...');
+    let user = await User.findOne({ email: cleanUserEmail });
+    console.log('👤 User:', user ? `FOUND (${user.username})` : 'NOT FOUND');
+    
+    // 4. Manual validation
+    console.log('🔍 Step 4: Manual validation...');
+    if (directQuery) {
+      const now = new Date();
+      const isExpired = directQuery.expiresAt < now;
+      const isMaxedOut = directQuery.currentUsageCount >= directQuery.maxUsageCount;
+      const emailMatches = directQuery.assignedEmail ? 
+        directQuery.assignedEmail.toLowerCase() === cleanUserEmail : true;
+      
+      console.log('📋 Manual validation:', {
+        isExpired,
+        isMaxedOut,
+        emailMatches,
+        assignedEmail: directQuery.assignedEmail,
+        expectedEmail: cleanUserEmail,
+        currentUsage: directQuery.currentUsageCount,
+        maxUsage: directQuery.maxUsageCount,
+        expiresAt: directQuery.expiresAt,
+        currentTime: now
+      });
+    }
+    
+    res.json({
+      success: true,
+      debug: {
+        directQuery: directQuery ? {
+          code: directQuery.code,
+          assignedEmail: directQuery.assignedEmail,
+          codeType: directQuery.codeType,
+          currentUsageCount: directQuery.currentUsageCount,
+          maxUsageCount: directQuery.maxUsageCount,
+          expiresAt: directQuery.expiresAt,
+          isUsed: directQuery.isUsed,
+          isValid: directQuery.isValid()
+        } : null,
+        findValidCodeResult: findValidResult ? 'VALID' : 'INVALID',
+        userExists: !!user,
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('💥 Test error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test error',
+      error: error.message
+    });
+  }
+});
+
+// ===== ORIGINAL ROUTES CONTINUE BELOW =====
+
 // 🚨 CRITICAL: SPECIFIC ROUTES MUST COME BEFORE PARAMETERIZED ROUTES
 
 // Notification counts route - MUST BE FIRST
