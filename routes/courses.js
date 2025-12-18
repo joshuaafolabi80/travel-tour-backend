@@ -205,7 +205,7 @@ router.get('/courses/notification-counts', authMiddleware, async (req, res) => {
 
 // ===== UPDATED ACCESS CODE VALIDATION ROUTES =====
 
-// Validate masterclass access code with email - UPDATED WITH FIXED findValidCode
+// Validate masterclass access code with email - UPDATED WITH MANUAL VALIDATION
 router.post('/courses/validate-masterclass-access', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
@@ -247,28 +247,36 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
       });
     }
 
-    // 🚨 FIXED: Use the corrected findValidCode method instead of findOne
-    const accessCodeRecord = await AccessCode.findValidCode(
-      cleanAccessCode, 
-      userEmail.trim().toLowerCase()
-    );
+    // 🚨 UPDATED: Use manual validation approach
+    const accessCodeRecord = await AccessCode.findOne({ 
+      code: cleanAccessCode 
+    }).populate('courseId');
 
+    // Then manually validate
     if (!accessCodeRecord) {
       return res.status(404).json({
         success: false,
-        message: 'Invalid access code or access denied'
+        message: 'Access code not found'
       });
     }
 
-    // Check if access code is valid using the instance method
-    if (!accessCodeRecord.isValid()) {
+    // Check usage limit
+    if (accessCodeRecord.currentUsageCount >= accessCodeRecord.maxUsageCount) {
       return res.status(400).json({
         success: false,
-        message: 'Access code is no longer valid (expired or max usage reached)'
+        message: 'Access code usage limit reached'
       });
     }
 
-    // Check if it's an assigned code and verify email
+    // Check expiration
+    if (accessCodeRecord.expiresAt < new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Access code has expired'
+      });
+    }
+
+    // Email validation for assigned codes
     if (accessCodeRecord.codeType === 'assigned' && accessCodeRecord.assignedEmail) {
       if (accessCodeRecord.assignedEmail.toLowerCase() !== userEmail.trim().toLowerCase()) {
         return res.status(400).json({
@@ -320,7 +328,7 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
   }
 });
 
-// Validate masterclass video access code with email - UPDATED WITH FIXED findValidCode
+// Validate masterclass video access code with email - UPDATED WITH MANUAL VALIDATION
 router.post('/videos/validate-masterclass-access', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
@@ -362,12 +370,12 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
       });
     }
 
-    // 🚨 FIXED: Use the corrected findValidCode method
-    const accessCodeRecord = await AccessCode.findValidCode(
-      cleanAccessCode, 
-      userEmail.trim().toLowerCase()
-    );
+    // 🚨 UPDATED: Use manual validation approach
+    const accessCodeRecord = await AccessCode.findOne({ 
+      code: cleanAccessCode 
+    }).populate('courseId');
 
+    // Then manually validate
     if (!accessCodeRecord) {
       return res.status(404).json({
         success: false,
@@ -375,15 +383,23 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
       });
     }
 
-    // Check if access code is valid
-    if (!accessCodeRecord.isValid()) {
+    // Check usage limit
+    if (accessCodeRecord.currentUsageCount >= accessCodeRecord.maxUsageCount) {
       return res.status(400).json({
         success: false,
-        message: 'Access code is no longer valid (expired or max usage reached)'
+        message: 'Access code usage limit reached'
       });
     }
 
-    // Check if it's an assigned code and verify email
+    // Check expiration
+    if (accessCodeRecord.expiresAt < new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Access code has expired'
+      });
+    }
+
+    // Email validation for assigned codes
     if (accessCodeRecord.codeType === 'assigned' && accessCodeRecord.assignedEmail) {
       if (accessCodeRecord.assignedEmail.toLowerCase() !== userEmail.trim().toLowerCase()) {
         return res.status(400).json({

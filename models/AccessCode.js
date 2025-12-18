@@ -140,37 +140,33 @@ accessCodeSchema.statics.generateUniqueCode = async function() {
 
 // CORRECTED: Static method to find valid access code with email validation
 accessCodeSchema.statics.findValidCode = async function(code, email = null) {
-  // First, get all codes that match the code and are not expired
-  const accessCodes = await this.find({
+  // Simple query - find all non-expired codes with this code
+  const query = {
     code: code,
     expiresAt: { $gt: new Date() }
-  })
-  .populate('courseId')
-  .populate('generatedBy', 'username email');
-
-  // Then filter in JavaScript to check usage count
-  const validCodes = accessCodes.filter(accessCode => {
-    // Check if usage count hasn't reached max
-    const notMaxedOut = accessCode.currentUsageCount < accessCode.maxUsageCount;
-    
-    // If email provided, handle email matching
-    if (email) {
-      const emailLower = email.toLowerCase();
-      const assignedEmailLower = accessCode.assignedEmail ? accessCode.assignedEmail.toLowerCase() : null;
-      
-      // Allow if: assigned email matches OR it's a generic code with no assigned email
-      const emailValid = !assignedEmailLower || 
-                        assignedEmailLower === emailLower ||
-                        (accessCode.codeType === 'generic' && !assignedEmailLower);
-      
-      return notMaxedOut && emailValid;
-    }
-    
-    // If no email provided, just check usage
-    return notMaxedOut;
-  });
-
-  return validCodes.length > 0 ? validCodes[0] : null;
+  };
+  
+  // If email provided, handle both generic and assigned codes
+  if (email) {
+    query.$or = [
+      { assignedEmail: email.toLowerCase() },
+      { 
+        codeType: 'generic',
+        assignedEmail: null
+      }
+    ];
+  }
+  
+  const accessCode = await this.findOne(query)
+    .populate('courseId')
+    .populate('generatedBy', 'username email');
+  
+  // Manually check usage count in JavaScript
+  if (accessCode && accessCode.currentUsageCount >= accessCode.maxUsageCount) {
+    return null; // Usage limit reached
+  }
+  
+  return accessCode;
 };
 
 // Static method to create generic access code (for admin uploads)
