@@ -205,7 +205,7 @@ router.get('/courses/notification-counts', authMiddleware, async (req, res) => {
 
 // ===== UPDATED ACCESS CODE VALIDATION ROUTES =====
 
-// Validate masterclass access code - SIMPLIFIED WORKING VERSION
+// Validate masterclass access code - UPDATED WITH ALLOWED EMAILS SUPPORT
 router.post('/courses/validate-masterclass-access', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
@@ -229,9 +229,9 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
     
     console.log('🧹 Cleaned:', { cleanAccessCode, cleanUserEmail });
     
-    // 1. DIRECT DATABASE LOOKUP - SIMPLE
+    // 1. DIRECT DATABASE LOOKUP - SIMPLE WITH CASE-INSENSITIVE SEARCH
     const accessCodeRecord = await AccessCode.findOne({ 
-      code: cleanAccessCode 
+      code: { $regex: new RegExp(`^${cleanAccessCode}$`, 'i') }
     })
     .populate('courseId');
     
@@ -247,6 +247,7 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
     console.log('📝 Access code details:', {
       code: accessCodeRecord.code,
       assignedEmail: accessCodeRecord.assignedEmail,
+      allowedEmails: accessCodeRecord.allowedEmails,
       codeType: accessCodeRecord.codeType,
       currentUsage: accessCodeRecord.currentUsageCount,
       maxUsage: accessCodeRecord.maxUsageCount,
@@ -273,15 +274,44 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
       });
     }
     
-    // 4. CHECK EMAIL FOR ASSIGNED CODES
-    if (accessCodeRecord.codeType === 'assigned' && accessCodeRecord.assignedEmail) {
-      if (accessCodeRecord.assignedEmail.toLowerCase() !== cleanUserEmail) {
-        console.log('❌ Email mismatch for assigned code');
-        return res.status(400).json({
-          success: false,
-          message: 'This access code is assigned to a different email address'
-        });
-      }
+    // 🔥 4. CHECK EMAIL VALIDATION - SUPPORTS SINGLE OR MULTIPLE EMAILS
+    // Check if email is authorized for this code
+    let isEmailAuthorized = false;
+
+    // Option 1: Check allowedEmails array (multiple users per code)
+    if (accessCodeRecord.allowedEmails && accessCodeRecord.allowedEmails.length > 0) {
+      isEmailAuthorized = accessCodeRecord.allowedEmails.includes(cleanUserEmail);
+      console.log('🔐 Checking allowedEmails list:', {
+        list: accessCodeRecord.allowedEmails,
+        userEmail: cleanUserEmail,
+        authorized: isEmailAuthorized
+      });
+    }
+
+    // Option 2: Check single assignedEmail (backward compatibility)
+    if (!isEmailAuthorized && accessCodeRecord.assignedEmail) {
+      isEmailAuthorized = accessCodeRecord.assignedEmail.toLowerCase() === cleanUserEmail;
+      console.log('🔐 Checking single assignedEmail:', {
+        assigned: accessCodeRecord.assignedEmail,
+        userEmail: cleanUserEmail,
+        authorized: isEmailAuthorized
+      });
+    }
+
+    // Option 3: If no email restrictions at all (generic codes - keep for backward compatibility)
+    if (!isEmailAuthorized && !accessCodeRecord.assignedEmail && 
+        (!accessCodeRecord.allowedEmails || accessCodeRecord.allowedEmails.length === 0)) {
+      isEmailAuthorized = true; // Generic code - any email can use it once
+      console.log('🔐 Generic code - any email allowed (first-time use)');
+    }
+
+    // If email is NOT authorized for this code
+    if (!isEmailAuthorized) {
+      console.log('❌ Email not authorized for this code');
+      return res.status(400).json({
+        success: false,
+        message: 'This access code is not authorized for your email address'
+      });
     }
     
     // 5. FIND OR CREATE USER
@@ -344,7 +374,7 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
   }
 });
 
-// Validate masterclass video access code with email - UPDATED WITH MANUAL VALIDATION
+// Validate masterclass video access code with email - UPDATED WITH ALLOWED EMAILS
 router.post('/videos/validate-masterclass-access', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
@@ -368,7 +398,7 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
     // Clean the access code
     const cleanAccessCode = accessCode.trim().toUpperCase();
 
-    // UPDATED: Validate access code length (1-20 characters) - FLEXIBLE
+    // Validate access code length (1-20 characters) - FLEXIBLE
     if (cleanAccessCode.length < 1) {
       console.log('❌ Invalid access code length:', cleanAccessCode.length);
       return res.status(400).json({
@@ -386,7 +416,7 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
       });
     }
 
-    // 🚨 UPDATED: Use manual validation approach
+    // Use manual validation approach
     const accessCodeRecord = await AccessCode.findOne({ 
       code: cleanAccessCode 
     }).populate('courseId');
@@ -415,12 +445,24 @@ router.post('/videos/validate-masterclass-access', async (req, res) => {
       });
     }
 
-    // Email validation for assigned codes
-    if (accessCodeRecord.codeType === 'assigned' && accessCodeRecord.assignedEmail) {
-      if (accessCodeRecord.assignedEmail.toLowerCase() !== userEmail.trim().toLowerCase()) {
+    // Email validation for assigned codes - UPDATED with allowedEmails
+    if (accessCodeRecord.codeType === 'assigned') {
+      let isEmailAuthorized = false;
+      
+      // Check allowedEmails array first
+      if (accessCodeRecord.allowedEmails && accessCodeRecord.allowedEmails.length > 0) {
+        isEmailAuthorized = accessCodeRecord.allowedEmails.includes(userEmail.trim().toLowerCase());
+      }
+      
+      // Check single assignedEmail
+      if (!isEmailAuthorized && accessCodeRecord.assignedEmail) {
+        isEmailAuthorized = accessCodeRecord.assignedEmail.toLowerCase() === userEmail.trim().toLowerCase();
+      }
+      
+      if (!isEmailAuthorized) {
         return res.status(400).json({
           success: false,
-          message: 'This access code is assigned to a different email address'
+          message: 'This access code is not authorized for your email address'
         });
       }
     }
@@ -685,7 +727,8 @@ router.get('/courses/user-access-codes/:email', async (req, res) => {
         { 
           codeType: 'generic',
           'usedBy.email': userEmail.trim().toLowerCase()
-        }
+        },
+        { allowedEmails: { $in: [userEmail.trim().toLowerCase()] } }
       ]
     })
     .populate('courseId', 'title description courseType')
@@ -731,6 +774,11 @@ router.post('/courses/check-course-access', async (req, res) => {
         },
         {
           'usedBy.email': userEmail.trim().toLowerCase(),
+          courseId: courseId,
+          isUsed: true
+        },
+        {
+          allowedEmails: { $in: [userEmail.trim().toLowerCase()] },
           courseId: courseId,
           isUsed: true
         }

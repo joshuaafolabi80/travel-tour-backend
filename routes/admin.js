@@ -1,3 +1,4 @@
+// travel-tour-backend/routes/admin.js
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
@@ -128,16 +129,17 @@ async function updateStudentNotificationCount(studentId) {
 
 // ===== COURSE MANAGEMENT ROUTES =====
 
-// Upload document course - FIXED TO HANDLE GENERIC ACCESS CODES
+// Upload document course - UPDATED WITH ALLOWED EMAILS SUPPORT
 router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, upload.single('courseFile'), async (req, res) => {
   try {
-    const { title, description, courseType, accessCode, accessCodeEmail, maxUsageCount = 1 } = req.body;
+    const { title, description, courseType, accessCode, accessCodeEmail, maxUsageCount = 1, allowedEmails } = req.body;
     
     console.log('📤 Uploading document course:', {
       title,
       courseType,
       hasAccessCode: !!accessCode,
       accessCodeEmail,
+      allowedEmails: allowedEmails ? 'Yes' : 'No',
       maxUsageCount,
       hasFile: !!req.file
     });
@@ -168,6 +170,16 @@ router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, up
       }
     }
 
+    // Parse allowed emails from textarea
+    let parsedAllowedEmails = [];
+    if (allowedEmails) {
+      parsedAllowedEmails = allowedEmails
+        .split(/[\n,]/)
+        .map(email => email.trim().toLowerCase())
+        .filter(email => email && email.includes('@'));
+      console.log('📧 Parsed allowed emails:', parsedAllowedEmails);
+    }
+    
     // Store the file path instead of reading content for non-text files
     let fileContent = '';
     let htmlContent = '';
@@ -237,7 +249,8 @@ router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, up
           courseId: course._id,
           courseType: 'document',
           generatedBy: req.user._id,
-          maxUsageCount: parseInt(maxUsageCount) || 1
+          maxUsageCount: parseInt(maxUsageCount) || 1,
+          allowedEmails: parsedAllowedEmails.length > 0 ? parsedAllowedEmails : undefined
         };
         
         // If email is provided, create assigned code, otherwise create generic code
@@ -245,6 +258,9 @@ router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, up
           accessCodeData.assignedEmail = accessCodeEmail.trim().toLowerCase();
           await AccessCode.createAssignedAccessCode(accessCodeData);
           console.log(`✅ Created ASSIGNED access code for email: ${accessCodeEmail}`);
+          if (parsedAllowedEmails.length > 0) {
+            console.log(`✅ Added ${parsedAllowedEmails.length} additional allowed emails`);
+          }
         } else {
           // REMOVED: Generic codes are no longer allowed
           // await AccessCode.createGenericAccessCode(accessCodeData);
@@ -270,7 +286,8 @@ router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, up
         hasImages: htmlContent.includes('<img') || htmlContent.includes('image'),
         htmlContentLength: htmlContent.length,
         accessCode: courseType === 'masterclass' ? accessCode : null,
-        hasEmailAssigned: !!accessCodeEmail
+        hasEmailAssigned: !!accessCodeEmail,
+        allowedEmailsCount: parsedAllowedEmails.length
       }
     });
 
@@ -289,16 +306,17 @@ router.post('/admin/upload-document-course', authMiddleware, adminMiddleware, up
   }
 });
 
-// Upload course (compatible with frontend) - FIXED
+// Upload course (compatible with frontend) - UPDATED WITH ALLOWED EMAILS
 router.post('/admin/upload-course', authMiddleware, adminMiddleware, upload.single('courseFile'), async (req, res) => {
   try {
-    const { title, description, courseType, accessCode, accessCodeEmail, maxUsageCount = 1 } = req.body;
+    const { title, description, courseType, accessCode, accessCodeEmail, maxUsageCount = 1, allowedEmails } = req.body;
     
     console.log('📤 Uploading course (compatible route):', {
       title,
       courseType,
       hasAccessCode: !!accessCode,
       accessCodeEmail,
+      allowedEmails: allowedEmails ? 'Yes' : 'No',
       maxUsageCount
     });
     
@@ -323,6 +341,16 @@ router.post('/admin/upload-course', authMiddleware, adminMiddleware, upload.sing
       }
     }
 
+    // Parse allowed emails from textarea
+    let parsedAllowedEmails = [];
+    if (allowedEmails) {
+      parsedAllowedEmails = allowedEmails
+        .split(/[\n,]/)
+        .map(email => email.trim().toLowerCase())
+        .filter(email => email && email.includes('@'));
+      console.log('📧 Parsed allowed emails:', parsedAllowedEmails);
+    }
+    
     // Store the file path instead of reading content for non-text files
     let fileContent = '';
     let htmlContent = '';
@@ -392,7 +420,8 @@ router.post('/admin/upload-course', authMiddleware, adminMiddleware, upload.sing
           courseId: course._id,
           courseType: 'document',
           generatedBy: req.user._id,
-          maxUsageCount: parseInt(maxUsageCount) || 1
+          maxUsageCount: parseInt(maxUsageCount) || 1,
+          allowedEmails: parsedAllowedEmails.length > 0 ? parsedAllowedEmails : undefined
         };
         
         // If email is provided, create assigned code, otherwise create generic code
@@ -400,6 +429,9 @@ router.post('/admin/upload-course', authMiddleware, adminMiddleware, upload.sing
           accessCodeData.assignedEmail = accessCodeEmail.trim().toLowerCase();
           await AccessCode.createAssignedAccessCode(accessCodeData);
           console.log(`✅ Created ASSIGNED access code for email: ${accessCodeEmail}`);
+          if (parsedAllowedEmails.length > 0) {
+            console.log(`✅ Added ${parsedAllowedEmails.length} additional allowed emails`);
+          }
         } else {
           await AccessCode.createGenericAccessCode(accessCodeData);
           console.log(`✅ Created GENERIC access code (no email assigned)`);
@@ -440,10 +472,10 @@ router.post('/admin/upload-course', authMiddleware, adminMiddleware, upload.sing
   }
 });
 
-// Convert destination to masterclass course - FIXED
+// Convert destination to masterclass course - UPDATED WITH ALLOWED EMAILS
 router.post('/admin/convert-to-masterclass/:courseId', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { accessCode, accessCodeEmail, maxUsageCount = 1 } = req.body;
+    const { accessCode, accessCodeEmail, maxUsageCount = 1, allowedEmails } = req.body;
     const courseId = req.params.courseId;
 
     const course = await Course.findById(courseId);
@@ -463,6 +495,15 @@ router.post('/admin/convert-to-masterclass/:courseId', authMiddleware, adminMidd
       }
     }
 
+    // Parse allowed emails from textarea
+    let parsedAllowedEmails = [];
+    if (allowedEmails) {
+      parsedAllowedEmails = allowedEmails
+        .split(/[\n,]/)
+        .map(email => email.trim().toLowerCase())
+        .filter(email => email && email.includes('@'));
+    }
+
     // Convert to masterclass
     course.courseType = 'masterclass';
     course.accessCode = accessCode || null;
@@ -475,7 +516,8 @@ router.post('/admin/convert-to-masterclass/:courseId', authMiddleware, adminMidd
         courseId: course._id,
         courseType: 'destination',
         generatedBy: req.user._id,
-        maxUsageCount: parseInt(maxUsageCount) || 1
+        maxUsageCount: parseInt(maxUsageCount) || 1,
+        allowedEmails: parsedAllowedEmails.length > 0 ? parsedAllowedEmails : undefined
       };
       
       // If email is provided, create assigned code, otherwise create generic code
@@ -483,6 +525,9 @@ router.post('/admin/convert-to-masterclass/:courseId', authMiddleware, adminMidd
         accessCodeData.assignedEmail = accessCodeEmail.trim().toLowerCase();
         await AccessCode.createAssignedAccessCode(accessCodeData);
         console.log(`✅ Created ASSIGNED access code for email: ${accessCodeEmail}`);
+        if (parsedAllowedEmails.length > 0) {
+          console.log(`✅ Added ${parsedAllowedEmails.length} additional allowed emails`);
+        }
       } else {
         await AccessCode.createGenericAccessCode(accessCodeData);
         console.log(`✅ Created GENERIC access code (no email assigned)`);

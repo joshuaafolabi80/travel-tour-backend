@@ -51,6 +51,13 @@ const accessCodeSchema = new mongoose.Schema({
     trim: true,
     default: null // Changed from required to optional
   },
+  // 🔥 NEW FIELD: Allowed emails array for whitelist system
+  allowedEmails: [{
+    type: String,
+    lowercase: true,
+    trim: true,
+    default: []
+  }],
   // NEW FIELD: Maximum usage count (default 1 for single use)
   maxUsageCount: {
     type: Number,
@@ -90,12 +97,25 @@ accessCodeSchema.methods.isValid = function() {
   return notExpired && notMaxedOut;
 };
 
-// Method to mark as used - UPDATED to handle both generic and assigned codes
+// Method to mark as used - UPDATED with allowedEmails check
 accessCodeSchema.methods.markAsUsed = function(userId, email) {
-  // For assigned codes, verify email matches if provided
-  if (this.codeType === 'assigned' && email && this.assignedEmail) {
-    if (this.assignedEmail.toLowerCase() !== email.toLowerCase()) {
-      throw new Error('Access code not assigned to this email');
+  // For codes with allowedEmails or assignedEmail, verify email matches
+  if ((this.allowedEmails && this.allowedEmails.length > 0) || this.assignedEmail) {
+    const cleanEmail = email ? email.toLowerCase() : null;
+    let isEmailAuthorized = false;
+    
+    // Check allowedEmails array first
+    if (this.allowedEmails && this.allowedEmails.length > 0) {
+      isEmailAuthorized = this.allowedEmails.includes(cleanEmail);
+    }
+    
+    // Check single assignedEmail
+    if (!isEmailAuthorized && this.assignedEmail) {
+      isEmailAuthorized = this.assignedEmail === cleanEmail;
+    }
+    
+    if (!isEmailAuthorized) {
+      throw new Error('Email not authorized for this access code');
     }
   }
   
@@ -138,32 +158,55 @@ accessCodeSchema.statics.generateUniqueCode = async function() {
   return code;
 };
 
-// CORRECTED: Static method to find valid access code with email validation
+// CORRECTED: Static method to find valid access code with email validation - UPDATED with allowedEmails
 accessCodeSchema.statics.findValidCode = async function(code, email = null) {
-  // Simple query - find all non-expired codes with this code
-  const query = {
-    code: code,
-    expiresAt: { $gt: new Date() }
-  };
+  const cleanCode = code.trim().toUpperCase();
+  const cleanEmail = email ? email.trim().toLowerCase() : null;
   
-  // If email provided, handle both generic and assigned codes
-  if (email) {
-    query.$or = [
-      { assignedEmail: email.toLowerCase() },
-      { 
-        codeType: 'generic',
-        assignedEmail: null
-      }
-    ];
+  console.log('🔍 findValidCode:', { cleanCode, cleanEmail });
+  
+  // First find the code
+  const accessCode = await this.findOne({ 
+    code: cleanCode 
+  })
+  .populate('courseId')
+  .populate('generatedBy', 'username email');
+  
+  if (!accessCode) {
+    console.log('❌ Code not found');
+    return null;
   }
   
-  const accessCode = await this.findOne(query)
-    .populate('courseId')
-    .populate('generatedBy', 'username email');
+  // Check validity
+  if (!accessCode.isValid()) {
+    console.log('❌ Code invalid (expired or maxed out)');
+    return null;
+  }
   
-  // Manually check usage count in JavaScript
-  if (accessCode && accessCode.currentUsageCount >= accessCode.maxUsageCount) {
-    return null; // Usage limit reached
+  // If email provided, check authorization
+  if (cleanEmail) {
+    let isEmailAuthorized = false;
+    
+    // Check allowedEmails array
+    if (accessCode.allowedEmails && accessCode.allowedEmails.length > 0) {
+      isEmailAuthorized = accessCode.allowedEmails.includes(cleanEmail);
+    }
+    
+    // Check single assignedEmail
+    if (!isEmailAuthorized && accessCode.assignedEmail) {
+      isEmailAuthorized = accessCode.assignedEmail === cleanEmail;
+    }
+    
+    // Generic codes (no email restrictions)
+    if (!isEmailAuthorized && !accessCode.assignedEmail && 
+        (!accessCode.allowedEmails || accessCode.allowedEmails.length === 0)) {
+      isEmailAuthorized = true; // Generic code
+    }
+    
+    if (!isEmailAuthorized) {
+      console.log('❌ Email not authorized:', cleanEmail);
+      return null;
+    }
   }
   
   return accessCode;
@@ -175,7 +218,8 @@ accessCodeSchema.statics.createGenericAccessCode = async function(data) {
     courseId,
     courseType = 'document',
     generatedBy,
-    assignedEmail = null, // Optional for admin uploads
+    assignedEmail = null,
+    allowedEmails = [],
     maxUsageCount = 1,
     expiresAt = null
   } = data;
@@ -188,6 +232,7 @@ accessCodeSchema.statics.createGenericAccessCode = async function(data) {
     courseType,
     generatedBy,
     assignedEmail: assignedEmail ? assignedEmail.toLowerCase().trim() : null,
+    allowedEmails: allowedEmails.map(email => email.toLowerCase().trim()),
     maxUsageCount,
     codeType: assignedEmail ? 'assigned' : 'generic',
     expiresAt: expiresAt || new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000)
@@ -204,6 +249,7 @@ accessCodeSchema.statics.createAssignedAccessCode = async function(data) {
     courseType = 'document',
     generatedBy,
     assignedEmail, // REQUIRED for assigned codes
+    allowedEmails = [],
     maxUsageCount = 1,
     expiresAt = null
   } = data;
@@ -220,6 +266,7 @@ accessCodeSchema.statics.createAssignedAccessCode = async function(data) {
     courseType,
     generatedBy,
     assignedEmail: assignedEmail.toLowerCase().trim(),
+    allowedEmails: allowedEmails.map(email => email.toLowerCase().trim()),
     maxUsageCount,
     codeType: 'assigned',
     expiresAt: expiresAt || new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000)
@@ -234,6 +281,7 @@ accessCodeSchema.statics.findByAssignedEmail = function(email) {
   return this.find({ 
     $or: [
       { assignedEmail: email.toLowerCase() },
+      { allowedEmails: email.toLowerCase() },
       { 
         codeType: 'generic',
         assignedEmail: null
