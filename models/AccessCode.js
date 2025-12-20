@@ -215,6 +215,7 @@ accessCodeSchema.statics.findValidCode = async function(code, email = null) {
 // Static method to create generic access code (for admin uploads)
 accessCodeSchema.statics.createGenericAccessCode = async function(data) {
   const {
+    code: providedCode,
     courseId,
     courseType = 'document',
     generatedBy,
@@ -224,7 +225,16 @@ accessCodeSchema.statics.createGenericAccessCode = async function(data) {
     expiresAt = null
   } = data;
   
-  const code = await this.generateUniqueCode();
+  // Use provided code or generate one
+  const code = providedCode ? providedCode : await this.generateUniqueCode();
+  
+  // If provided code exists, check for duplicates to be safe
+  if (providedCode) {
+    const existing = await this.findOne({ code: providedCode });
+    if (existing) {
+      throw new Error(`Access code '${providedCode}' already exists`);
+    }
+  }
   
   const accessCode = new this({
     code,
@@ -245,6 +255,7 @@ accessCodeSchema.statics.createGenericAccessCode = async function(data) {
 // Static method to create assigned access code with email requirement
 accessCodeSchema.statics.createAssignedAccessCode = async function(data) {
   const {
+    code: providedCode,
     courseId,
     courseType = 'document',
     generatedBy,
@@ -258,7 +269,16 @@ accessCodeSchema.statics.createAssignedAccessCode = async function(data) {
     throw new Error('assignedEmail is required for assigned access codes');
   }
   
-  const code = await this.generateUniqueCode();
+  // Use provided code or generate one
+  const code = providedCode ? providedCode : await this.generateUniqueCode();
+  
+  // If provided code exists, check for duplicates to be safe
+  if (providedCode) {
+    const existing = await this.findOne({ code: providedCode });
+    if (existing) {
+      throw new Error(`Access code '${providedCode}' already exists`);
+    }
+  }
   
   const accessCode = new this({
     code,

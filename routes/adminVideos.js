@@ -21,7 +21,7 @@ router.post('/admin/upload-video', authMiddleware, adminMiddleware, async (req, 
       });
     }
 
-    const { title, description, videoType, category, accessCode } = req.body;
+    const { title, description, videoType, category, accessCode, accessCodeEmail, allowedEmails } = req.body;
     const videoFile = req.files.videoFile;
 
     // Validate required fields
@@ -38,6 +38,16 @@ router.post('/admin/upload-video', authMiddleware, adminMiddleware, async (req, 
         success: false,
         message: 'Access code is required for masterclass videos'
       });
+    }
+
+    // Parse allowed emails from textarea
+    let parsedAllowedEmails = [];
+    if (allowedEmails) {
+      parsedAllowedEmails = allowedEmails
+        .split(/[\n,]/)
+        .map(email => email.trim().toLowerCase())
+        .filter(email => email && email.includes('@'));
+      console.log('📧 Parsed allowed emails for video:', parsedAllowedEmails);
     }
 
     // Upload to Cloudinary
@@ -64,6 +74,35 @@ router.post('/admin/upload-video', authMiddleware, adminMiddleware, async (req, 
     });
 
     await video.save();
+
+    // If masterclass video and access code provided, create access code record
+    if (videoType === 'masterclass' && accessCode) {
+      try {
+        const accessCodeData = {
+          code: accessCode,
+          courseId: video._id,
+          courseType: 'masterclass_video', // Differentiate from documents
+          generatedBy: req.user._id,
+          maxUsageCount: 1, // Default to 1
+          allowedEmails: parsedAllowedEmails.length > 0 ? parsedAllowedEmails : undefined
+        };
+        
+        // If email is provided, create assigned code, otherwise create generic code
+        if (accessCodeEmail) {
+          accessCodeData.assignedEmail = accessCodeEmail.trim().toLowerCase();
+          await AccessCode.createAssignedAccessCode(accessCodeData);
+          console.log(`✅ Created ASSIGNED access code for video: ${accessCodeEmail}`);
+        } else {
+          // Even if no specific assigned email, we create a generic code with the allowed emails
+          await AccessCode.createGenericAccessCode(accessCodeData);
+          console.log(`✅ Created GENERIC access code for video`);
+        }
+      } catch (codeError) {
+        console.error('❌ Error creating access code for video:', codeError);
+        // Note: We don't rollback video upload, just log error. 
+        // In production, might want to rollback or alert admin.
+      }
+    }
 
     // Update notification counts (you'll need to implement this)
     await updateVideoNotificationCounts();
