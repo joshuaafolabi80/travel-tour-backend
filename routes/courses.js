@@ -1,3 +1,4 @@
+// travel-tour-backend/routes/courses.js - FIXED VERSION
 const express = require('express');
 const mongoose = require('mongoose');
 const DocumentCourse = require('../models/DocumentCourse');
@@ -44,44 +45,84 @@ router.get('/courses/notification-counts', authMiddleware, async (req, res) => {
   }
 });
 
-// 2. PRIMARY VALIDATION ROUTE (Whitelisted Only)
+// 2. PRIMARY VALIDATION ROUTE (Whitelisted Only) - FIXED VERSION
 router.post('/courses/validate-masterclass-access', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
 
+    console.log('🔐 Validating masterclass access code:', accessCode, 'for email:', userEmail);
+
     if (!accessCode || !userEmail) {
-      return res.status(400).json({ success: false, message: 'Code and email are required' });
+      console.log('❌ Missing code or email');
+      return res.status(400).json({ success: false, message: 'Access code and email address are required' });
     }
 
     const cleanCode = accessCode.trim().toUpperCase();
     const cleanEmail = userEmail.trim().toLowerCase();
 
+    console.log('🔄 Cleaned values - Code:', cleanCode, 'Email:', cleanEmail);
+
     // Find the code
     const accessCodeRecord = await AccessCode.findOne({ code: cleanCode }).populate('courseId');
-
+    
     if (!accessCodeRecord) {
+      console.log('❌ Access code not found:', cleanCode);
       return res.status(400).json({ success: false, message: 'Invalid access code' });
     }
 
+    console.log('✅ Found access code record:', {
+      code: accessCodeRecord.code,
+      assignedEmail: accessCodeRecord.assignedEmail,
+      allowedEmails: accessCodeRecord.allowedEmails,
+      expiresAt: accessCodeRecord.expiresAt,
+      currentUsage: accessCodeRecord.currentUsageCount,
+      maxUsage: accessCodeRecord.maxUsageCount
+    });
+
     // Check Expiration
     if (accessCodeRecord.expiresAt < new Date()) {
+      console.log('❌ Code expired:', accessCodeRecord.expiresAt);
       return res.status(400).json({ success: false, message: 'This access code has expired' });
     }
 
-    // Check Whitelist (The Critical Part)
-    const isWhitelisted = accessCodeRecord.allowedEmails && 
-                          accessCodeRecord.allowedEmails.map(e => e.toLowerCase()).includes(cleanEmail);
+    // Check Usage Limit
+    if (accessCodeRecord.currentUsageCount >= accessCodeRecord.maxUsageCount && accessCodeRecord.maxUsageCount !== 9999) {
+      console.log('❌ Usage limit reached:', accessCodeRecord.currentUsageCount, '/', accessCodeRecord.maxUsageCount);
+      return res.status(400).json({ success: false, message: 'Access code usage limit reached' });
+    }
 
-    if (!isWhitelisted) {
+    // 🔥 FIXED: Check Whitelist - Check BOTH assignedEmail AND allowedEmails array
+    const isAuthorized = (
+      // Check assignedEmail (primary email)
+      (accessCodeRecord.assignedEmail && accessCodeRecord.assignedEmail.toLowerCase() === cleanEmail) ||
+      // Check allowedEmails array (secondary emails)
+      (accessCodeRecord.allowedEmails && 
+       Array.isArray(accessCodeRecord.allowedEmails) &&
+       accessCodeRecord.allowedEmails.some(email => 
+         email && email.toLowerCase() === cleanEmail
+       ))
+    );
+
+    if (!isAuthorized) {
+      console.log('❌ Email not authorized:', {
+        cleanEmail: cleanEmail,
+        assignedEmail: accessCodeRecord.assignedEmail,
+        allowedEmails: accessCodeRecord.allowedEmails,
+        isInAllowedEmails: accessCodeRecord.allowedEmails ? 
+          accessCodeRecord.allowedEmails.map(e => e.toLowerCase()).includes(cleanEmail) : false
+      });
       return res.status(400).json({ 
         success: false, 
         message: 'Your email is not authorized to use this access code.' 
       });
     }
 
+    console.log('✅ Email authorized for code:', cleanEmail);
+
     // Find or Create User
     let user = await User.findOne({ email: cleanEmail });
     if (!user) {
+      console.log('👤 Creating new user for email:', cleanEmail);
       user = new User({
         email: cleanEmail,
         username: cleanEmail.split('@')[0],
@@ -89,10 +130,15 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
         active: true
       });
       await user.save();
+      console.log('✅ New user created with ID:', user._id);
+    } else {
+      console.log('👤 Existing user found:', user._id);
     }
 
     // Update Access
     if (accessCodeRecord.courseId) {
+      console.log('🔗 Adding course to user accessible courses:', accessCodeRecord.courseId._id);
+      
       await User.findByIdAndUpdate(user._id, {
         $addToSet: { accessibleMasterclassCourses: accessCodeRecord.courseId._id }
       });
@@ -102,40 +148,61 @@ router.post('/courses/validate-masterclass-access', async (req, res) => {
       accessCodeRecord.usedBy = user._id;
       accessCodeRecord.usedAt = new Date();
       await accessCodeRecord.save();
+      
+      console.log('✅ Updated usage count:', accessCodeRecord.currentUsageCount);
     }
 
     res.json({
       success: true,
       message: 'Access granted!',
-      userName: user.username,
-      courseTitle: accessCodeRecord.courseId?.title
+      userName: user.username || user.email.split('@')[0],
+      courseTitle: accessCodeRecord.courseId?.title || 'Masterclass Course'
     });
 
   } catch (error) {
-    console.error('Validation Error:', error);
+    console.error('❌ Validation Error:', error);
     res.status(500).json({ success: false, message: 'Server error during validation' });
   }
 });
 
-// 3. Video Specific Validation (Whitelisted Only)
+// 3. Video Specific Validation (Whitelisted Only) - FIXED VERSION
 router.post('/videos/validate-masterclass-access', async (req, res) => {
   try {
     const { accessCode, userEmail } = req.body;
     const cleanCode = accessCode.trim().toUpperCase();
     const cleanEmail = userEmail.trim().toLowerCase();
 
+    console.log('🎥 Validating video access code:', cleanCode, 'for email:', cleanEmail);
+
     const record = await AccessCode.findOne({ code: cleanCode });
 
-    if (!record || !record.allowedEmails.map(e => e.toLowerCase()).includes(cleanEmail)) {
-      return res.status(400).json({ success: false, message: 'Access denied: Email not whitelisted for this code.' });
+    if (!record) {
+      console.log('❌ Video access code not found:', cleanCode);
+      return res.status(400).json({ success: false, message: 'Invalid access code' });
+    }
+
+    // 🔥 FIXED: Check BOTH assignedEmail AND allowedEmails
+    const isAuthorized = (
+      (record.assignedEmail && record.assignedEmail.toLowerCase() === cleanEmail) ||
+      (record.allowedEmails && 
+       Array.isArray(record.allowedEmails) &&
+       record.allowedEmails.some(email => email && email.toLowerCase() === cleanEmail))
+    );
+
+    if (!isAuthorized) {
+      console.log('❌ Email not authorized for video access:', cleanEmail);
+      return res.status(400).json({ success: false, message: 'Access denied: Email not authorized for this code.' });
     }
 
     if (record.expiresAt < new Date()) {
-        return res.status(400).json({ success: false, message: 'Code expired.' });
+      console.log('❌ Video code expired:', record.expiresAt);
+      return res.status(400).json({ success: false, message: 'Code expired.' });
     }
 
+    console.log('✅ Video access granted for:', cleanEmail);
     res.json({ success: true, message: 'Video access granted' });
   } catch (error) {
+    console.error('❌ Video validation error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
