@@ -1,4 +1,4 @@
-// server/models/DocumentCourse.js
+// travel-tour-backend/models/DocumentCourse.js
 const mongoose = require('mongoose');
 
 const documentCourseSchema = new mongoose.Schema({

@@ -1,3 +1,4 @@
+// travel-tour-backend/models/AccessCode.js - FIXED
 const mongoose = require('mongoose');
 
 const accessCodeSchema = new mongoose.Schema({
@@ -80,7 +81,22 @@ const accessCodeSchema = new mongoose.Schema({
     type: String,
     enum: ['generic', 'assigned'],
     default: 'generic'
+  },
+  assignedUserName: {  // ADD THIS FIELD - it's referenced in the admin.js
+    type: String,
+    trim: true,
+    default: ''
   }
 }, {
   timestamps: true
 });
+
+// Add indexes for better performance
+accessCodeSchema.index({ code: 1 });
+accessCodeSchema.index({ courseId: 1 });
+accessCodeSchema.index({ assignedEmail: 1 });
+accessCodeSchema.index({ expiresAt: 1 });
+
+const AccessCode = mongoose.model('AccessCode', accessCodeSchema);
+
+module.exports = AccessCode;

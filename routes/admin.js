@@ -5,7 +5,7 @@ const User = require('../models/User');
 const Message = require('../models/Message');
 const Course = require('../models/Course');
 const DocumentCourse = require('../models/DocumentCourse');
-const AccessCode = require('../models/AccessCode');
+const AccessCodeModel = require('../models/AccessCode'); // FIXED: Changed variable name
 const nodemailer = require('nodemailer');
 const multer = require('multer');
 const path = require('path');
@@ -284,7 +284,7 @@ router.delete('/admin/courses/:id', authMiddleware, adminMiddleware, async (req,
     console.log(`Found course: ${course.title} (Type: ${course.courseType})`);
 
     // Delete associated access codes
-    const deletedAccessCodes = await AccessCode.deleteMany({ courseId: course._id });
+    const deletedAccessCodes = await AccessCodeModel.deleteMany({ courseId: course._id });
     console.log(`Deleted ${deletedAccessCodes.deletedCount} associated access codes`);
 
     // Delete file if exists
@@ -482,7 +482,8 @@ router.post(['/admin/upload-document-course', '/admin/upload-course'], authMiddl
     if (courseType === 'masterclass' && accessCode && primaryEmail) {
       console.log('Creating access code for masterclass...');
       
-      const newCode = new AccessCode({
+      // FIXED: Changed from AccessCode to AccessCodeModel
+      const newCode = new AccessCodeModel({
         code: accessCode.trim(),
         courseId: course._id,
         courseType: 'document',
@@ -551,7 +552,8 @@ router.post('/admin/convert-to-masterclass/:courseId', authMiddleware, adminMidd
     course.accessCode = accessCode;
     await course.save();
 
-    const accessCodeRecord = new AccessCode({
+    // FIXED: Changed from AccessCode to AccessCodeModel
+    const accessCodeRecord = new AccessCodeModel({
       code: accessCode,
       courseId: course._id,
       courseType: 'destination',
@@ -565,6 +567,7 @@ router.post('/admin/convert-to-masterclass/:courseId', authMiddleware, adminMidd
     await updateCourseNotificationCounts('masterclass');
     res.json({ success: true, message: 'Converted and Whitelisted' });
   } catch (error) { 
+    console.error('Error converting to masterclass:', error);
     res.status(500).json({ success: false, message: error.message }); 
   }
 });
@@ -576,7 +579,8 @@ router.get('/admin/courses/:id/access-codes', authMiddleware, adminMiddleware, a
   try {
     console.log(`🔑 Fetching access codes for course ID: ${req.params.id}`);
     
-    const codes = await AccessCode.find({ courseId: req.params.id })
+    // FIXED: Changed from AccessCode to AccessCodeModel
+    const codes = await AccessCodeModel.find({ courseId: req.params.id })
       .populate('usedBy', 'username email')
       .populate('generatedBy', 'username email')
       .sort({ createdAt: -1 })
@@ -666,7 +670,8 @@ router.post('/admin/courses/:id/generate-access-code-for-user', authMiddleware, 
     const accessCode = generateAccessCode();
     console.log(`Generated access code: ${accessCode}`);
 
-    const newCode = new AccessCode({
+    // FIXED: Changed from AccessCode to AccessCodeModel
+    const newCode = new AccessCodeModel({
       code: accessCode,
       courseId: req.params.id,
       courseType: 'document',
@@ -711,7 +716,8 @@ router.delete('/admin/access-codes/:id', authMiddleware, adminMiddleware, async 
   try {
     console.log(`🗑️ Deleting access code ID: ${req.params.id}`);
     
-    const code = await AccessCode.findByIdAndDelete(req.params.id);
+    // FIXED: Changed from AccessCode to AccessCodeModel
+    const code = await AccessCodeModel.findByIdAndDelete(req.params.id);
     
     if (!code) {
       console.log(`❌ Access code not found: ${req.params.id}`);
