@@ -33,9 +33,18 @@ const videoSchema = new mongoose.Schema({
   fileSize: {
     type: Number
   },
+  // The primary code used for this video (for masterclass type)
   accessCode: {
-    type: String
+    type: String,
+    trim: true
   },
+  // 🔥 UPDATED: Whitelist of emails allowed to view this specific video
+  // Matches the structure in your AccessCode model
+  allowedEmails: [{
+    type: String,
+    lowercase: true,
+    trim: true
+  }],
   isActive: {
     type: Boolean,
     default: true
@@ -55,5 +64,6 @@ const videoSchema = new mongoose.Schema({
 // Index for better query performance
 videoSchema.index({ videoType: 1, isActive: 1 });
 videoSchema.index({ uploadedAt: -1 });
+videoSchema.index({ accessCode: 1 }); // Added index for code lookups
 
 module.exports = mongoose.model('Video', videoSchema);
