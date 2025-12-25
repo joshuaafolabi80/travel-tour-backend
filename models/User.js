@@ -1,25 +1,44 @@
-// server/models/User.js (COMPLETE INTEGRATED VERSION)
+// server/models/User.js (UPDATED WITH GOOGLE OAUTH INTEGRATION)
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
   username: {
     type: String,
-    required: true,
-    unique: true,
-    trim: true
+    trim: true,
+    // Make username optional for Google users
+    // required: function() { return this.authProvider === 'email'; }
   },
   email: {
     type: String,
     required: true,
     unique: true,
     lowercase: true,
-    trim: true
+    trim: true,
+    index: true
   },
   password: {
     type: String,
-    required: true
+    // Password required only for email/password users, not for Google users
+    required: function() { return this.authProvider === 'email'; }
   },
+  
+  // GOOGLE OAUTH FIELDS - NEW
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true // Allows null values while maintaining uniqueness
+  },
+  authProvider: {
+    type: String,
+    enum: ['email', 'google'],
+    default: 'email'
+  },
+  profilePicture: {
+    type: String,
+    default: ''
+  },
+  
   role: {
     type: String,
     enum: ['student', 'admin'],
@@ -42,7 +61,10 @@ const userSchema = new mongoose.Schema({
     quizzesTaken: { type: Number, default: 0 },
     averageScore: { type: Number, default: 0 },
     lastLogin: Date,
-    loginCount: { type: Number, default: 0 }
+    loginCount: { type: Number, default: 0 },
+    // Add Google-specific stats
+    googleSignInCount: { type: Number, default: 0 },
+    lastGoogleSignIn: Date
   },
   preferences: {
     emailNotifications: { type: Boolean, default: true },
@@ -61,7 +83,7 @@ const userSchema = new mongoose.Schema({
     default: Date.now
   },
   
-  // NEW FIELDS FOR COURSE NOTIFICATIONS AND MASTERCLASS ACCESS
+  // COURSE NOTIFICATIONS AND MASTERCLASS ACCESS
   generalCoursesCount: {
     type: Number,
     default: 0
@@ -91,7 +113,6 @@ const userSchema = new mongoose.Schema({
     expiresAt: {
       type: Date,
       default: function() {
-        // Default expiration 1 year from access
         const oneYearFromNow = new Date();
         oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
         return oneYearFromNow;
@@ -106,42 +127,80 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
-  // NEW: Field to track accessible masterclass courses
+  // Field to track accessible masterclass courses
   accessibleMasterclassCourses: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'DocumentCourse'
   }],
   
-  // 🚨 VIDEO-SPECIFIC FIELDS FROM FIRST FILE
+  // VIDEO-SPECIFIC FIELDS
   masterclassVideoAccess: {
     type: Boolean,
     default: false
   },
   masterclassVideoAccessGrantedAt: {
     type: Date
+  },
+  
+  // GOOGLE-SPECIFIC ADDITIONS
+  emailVerified: {
+    type: Boolean,
+    default: false
+  },
+  googleProfile: {
+    locale: String,
+    verifiedEmail: Boolean,
+    givenName: String,
+    familyName: String
+  },
+  lastOAuthLogin: {
+    type: Date
   }
 }, {
   timestamps: true
 });
 
-// Hash password before saving
+// Hash password before saving (only for email users)
 userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
-  this.password = await bcrypt.hash(this.password, 12);
-  next();
-});
-
-// Role validation safeguard - Ensure role is always valid
-userSchema.pre('save', function(next) {
-  // Ensure role is always valid
-  if (!['student', 'admin'].includes(this.role)) {
-    this.role = 'student'; // Default to student if invalid
+  // Only hash password if it's modified and user uses email authentication
+  if (!this.isModified('password') || this.authProvider !== 'email') return next();
+  
+  // Only hash if password exists (Google users won't have passwords)
+  if (this.password) {
+    this.password = await bcrypt.hash(this.password, 12);
   }
   next();
 });
 
-// Compare password method
+// Role validation safeguard
+userSchema.pre('save', function(next) {
+  if (!['student', 'admin'].includes(this.role)) {
+    this.role = 'student';
+  }
+  next();
+});
+
+// NEW: Set default username for Google users
+userSchema.pre('save', function(next) {
+  // Generate username for Google users if not provided
+  if (this.authProvider === 'google' && !this.username) {
+    if (this.profile?.firstName && this.profile?.lastName) {
+      this.username = `${this.profile.firstName}${this.profile.lastName}`.toLowerCase();
+    } else if (this.email) {
+      this.username = this.email.split('@')[0];
+    } else {
+      this.username = `user_${Date.now()}`;
+    }
+  }
+  next();
+});
+
+// Compare password method (only for email users)
 userSchema.methods.correctPassword = async function(candidatePassword) {
+  // Google users don't have passwords
+  if (this.authProvider !== 'email' || !this.password) {
+    return false;
+  }
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
@@ -166,7 +225,7 @@ userSchema.methods.resetAdminMessageCount = function() {
   return this.save();
 };
 
-// NEW METHODS FOR COURSE MANAGEMENT
+// COURSE MANAGEMENT METHODS
 
 // Method to increment course notification counts
 userSchema.methods.incrementCourseNotification = function(courseType) {
@@ -193,17 +252,15 @@ userSchema.methods.resetCourseNotifications = function(courseType) {
 userSchema.methods.addMasterclassAccess = function(accessData) {
   const { courseId, courseType, accessCode, expiresAt } = accessData;
   
-  // Remove existing access for this course if any
   this.masterclassAccess = this.masterclassAccess.filter(
     access => !(access.courseId.equals(courseId) && access.courseType === courseType)
   );
   
-  // Add new access
   this.masterclassAccess.push({
     courseId,
     courseType,
     accessCode,
-    expiresAt: expiresAt || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year default
+    expiresAt: expiresAt || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
     accessedAt: new Date(),
     isActive: true
   });
@@ -230,7 +287,7 @@ userSchema.methods.getActiveMasterclassAccesses = function() {
   );
 };
 
-// Method to revoke masterclass access (for specific course access)
+// Method to revoke masterclass access
 userSchema.methods.revokeMasterclassAccess = function(courseId, courseType) {
   const accessIndex = this.masterclassAccess.findIndex(access => 
     access.courseId.equals(courseId) && access.courseType === courseType
@@ -244,7 +301,7 @@ userSchema.methods.revokeMasterclassAccess = function(courseId, courseType) {
   return this;
 };
 
-// NEW: Method to add accessible masterclass course
+// Method to add accessible masterclass course
 userSchema.methods.addAccessibleMasterclassCourse = function(courseId) {
   if (!this.accessibleMasterclassCourses.includes(courseId)) {
     this.accessibleMasterclassCourses.push(courseId);
@@ -252,33 +309,33 @@ userSchema.methods.addAccessibleMasterclassCourse = function(courseId) {
   return this.save();
 };
 
-// NEW: Method to check if user has access to masterclass course
+// Method to check if user has access to masterclass course
 userSchema.methods.hasAccessToMasterclassCourse = function(courseId) {
   return this.accessibleMasterclassCourses.includes(courseId);
 };
 
-// NEW: Method to get accessible masterclass courses
+// Method to get accessible masterclass courses
 userSchema.methods.getAccessibleMasterclassCourses = function() {
   return this.accessibleMasterclassCourses;
 };
 
-// 🚨 VIDEO-SPECIFIC METHODS FROM FIRST FILE
+// VIDEO-SPECIFIC METHODS
 
-// Method to grant masterclass access FOR VIDEOS (simple boolean access)
+// Method to grant masterclass access FOR VIDEOS
 userSchema.methods.grantMasterclassAccessSimple = function() {
   this.masterclassVideoAccess = true;
   this.masterclassVideoAccessGrantedAt = new Date();
   return this.save();
 };
 
-// Method to revoke masterclass access FOR VIDEOS (simple boolean access)
+// Method to revoke masterclass access FOR VIDEOS
 userSchema.methods.revokeMasterclassAccessSimple = function() {
   this.masterclassVideoAccess = false;
   this.masterclassVideoAccessGrantedAt = null;
   return this.save();
 };
 
-// Method to check if user has masterclass access FOR VIDEOS (simple boolean access)
+// Method to check if user has masterclass access FOR VIDEOS
 userSchema.methods.hasMasterclassAccessSimple = function() {
   return this.masterclassVideoAccess === true;
 };
@@ -290,6 +347,128 @@ userSchema.methods.getMasterclassAccessInfo = function() {
     grantedAt: this.masterclassVideoAccessGrantedAt,
     isActive: this.masterclassVideoAccess === true
   };
+};
+
+// GOOGLE OAUTH-SPECIFIC METHODS - NEW
+
+// Method to handle Google OAuth login/registration
+userSchema.statics.findOrCreateGoogleUser = async function(googleProfile) {
+  const { sub: googleId, email, name, picture, given_name, family_name, locale, email_verified } = googleProfile;
+  
+  // Try to find by Google ID first
+  let user = await this.findOne({ googleId });
+  
+  if (user) {
+    // Update existing Google user
+    user.lastOAuthLogin = new Date();
+    user.stats.googleSignInCount += 1;
+    user.stats.lastGoogleSignIn = new Date();
+    user.stats.loginCount += 1;
+    user.stats.lastLogin = new Date();
+    
+    // Update profile picture if changed
+    if (picture && picture !== user.profilePicture) {
+      user.profilePicture = picture;
+    }
+    
+    await user.save();
+    return user;
+  }
+  
+  // Try to find by email (for users who might have registered with email first)
+  user = await this.findOne({ email });
+  
+  if (user) {
+    // Link Google account to existing email user
+    user.googleId = googleId;
+    user.authProvider = 'google'; // Switch to Google auth
+    user.profilePicture = picture || user.profilePicture;
+    user.lastOAuthLogin = new Date();
+    user.stats.googleSignInCount = 1;
+    user.stats.lastGoogleSignIn = new Date();
+    user.stats.loginCount += 1;
+    user.stats.lastLogin = new Date();
+    
+    // Update profile info from Google
+    if (!user.profile?.firstName && given_name) {
+      user.profile = user.profile || {};
+      user.profile.firstName = given_name;
+    }
+    if (!user.profile?.lastName && family_name) {
+      user.profile = user.profile || {};
+      user.profile.lastName = family_name;
+    }
+    
+    await user.save();
+    return user;
+  }
+  
+  // Create new Google user
+  user = new this({
+    email,
+    googleId,
+    authProvider: 'google',
+    profilePicture: picture || '',
+    emailVerified: email_verified || false,
+    
+    // Set username from Google profile
+    username: name ? name.replace(/\s+/g, '').toLowerCase() : email.split('@')[0],
+    
+    profile: {
+      firstName: given_name || '',
+      lastName: family_name || '',
+      avatar: picture || ''
+    },
+    
+    googleProfile: {
+      locale: locale || '',
+      verifiedEmail: email_verified || false,
+      givenName: given_name || '',
+      familyName: family_name || ''
+    },
+    
+    lastOAuthLogin: new Date(),
+    stats: {
+      googleSignInCount: 1,
+      lastGoogleSignIn: new Date(),
+      loginCount: 1,
+      lastLogin: new Date()
+    }
+  });
+  
+  await user.save();
+  return user;
+};
+
+// Method to convert email user to Google user
+userSchema.methods.convertToGoogleAuth = async function(googleProfile) {
+  const { sub: googleId, picture, given_name, family_name } = googleProfile;
+  
+  this.googleId = googleId;
+  this.authProvider = 'google';
+  this.profilePicture = picture || this.profilePicture;
+  this.lastOAuthLogin = new Date();
+  
+  // Remove password since user will use Google auth
+  this.password = undefined;
+  
+  // Update profile from Google
+  if (!this.profile?.firstName && given_name) {
+    this.profile = this.profile || {};
+    this.profile.firstName = given_name;
+  }
+  if (!this.profile?.lastName && family_name) {
+    this.profile = this.profile || {};
+    this.profile.lastName = family_name;
+  }
+  
+  await this.save();
+  return this;
+};
+
+// Method to check if user can reset password
+userSchema.methods.canResetPassword = function() {
+  return this.authProvider === 'email';
 };
 
 // Method to get total notification count
@@ -312,7 +491,9 @@ userSchema.methods.getCourseStats = function() {
     masterclassVideoAccess: this.masterclassVideoAccess,
     masterclassVideoAccessGrantedAt: this.masterclassVideoAccessGrantedAt,
     totalNotifications: this.getTotalNotificationCount(),
-    lastNotificationCheck: this.lastCourseNotificationCheck
+    lastNotificationCheck: this.lastCourseNotificationCheck,
+    authProvider: this.authProvider,
+    emailVerified: this.emailVerified
   };
 };
 
@@ -333,7 +514,6 @@ userSchema.methods.completeCourse = function() {
 userSchema.methods.updateQuizStats = function(score) {
   this.stats.quizzesTaken += 1;
   
-  // Update average score
   const currentTotal = (this.stats.averageScore * (this.stats.quizzesTaken - 1)) || 0;
   this.stats.averageScore = (currentTotal + score) / this.stats.quizzesTaken;
   
@@ -342,45 +522,63 @@ userSchema.methods.updateQuizStats = function(score) {
 
 // Virtual for full name
 userSchema.virtual('fullName').get(function() {
+  // For Google users, use Google profile names
+  if (this.authProvider === 'google' && this.googleProfile) {
+    return `${this.googleProfile.givenName || ''} ${this.googleProfile.familyName || ''}`.trim() || this.username;
+  }
   return `${this.profile?.firstName || ''} ${this.profile?.lastName || ''}`.trim() || this.username;
 });
 
-// Virtual for display name (first name + last initial)
+// Virtual for display name
 userSchema.virtual('displayName').get(function() {
+  // For Google users
+  if (this.authProvider === 'google' && this.googleProfile?.givenName) {
+    const lastNameInitial = this.googleProfile.familyName ? this.googleProfile.familyName.charAt(0) + '.' : '';
+    return `${this.googleProfile.givenName} ${lastNameInitial}`.trim();
+  }
+  
   if (this.profile?.firstName && this.profile?.lastName) {
     return `${this.profile.firstName} ${this.profile.lastName.charAt(0)}.`;
   }
   return this.username;
 });
 
-// Virtual for isNewUser (registered within last 7 days)
+// Virtual for isNewUser
 userSchema.virtual('isNewUser').get(function() {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   return this.createdAt > sevenDaysAgo;
 });
 
-// Index for better query performance
+// Virtual for auth type display
+userSchema.virtual('authTypeDisplay').get(function() {
+  return this.authProvider === 'google' ? 'Google' : 'Email';
+});
+
+// Indexes for better query performance
 userSchema.index({ email: 1 });
 userSchema.index({ role: 1, active: 1 });
 userSchema.index({ 'masterclassAccess.courseId': 1 });
 userSchema.index({ 'masterclassAccess.expiresAt': 1 });
 userSchema.index({ lastCourseNotificationCheck: 1 });
 userSchema.index({ accessibleMasterclassCourses: 1 });
-userSchema.index({ masterclassVideoAccess: 1 }); // 🚨 VIDEO-SPECIFIC INDEX
+userSchema.index({ masterclassVideoAccess: 1 });
+userSchema.index({ googleId: 1 }); // NEW: Index for Google ID queries
+userSchema.index({ authProvider: 1 }); // NEW: Index for auth provider queries
 
-// Transform output to remove password and sensitive data
+// Transform output to remove sensitive data
 userSchema.methods.toJSON = function() {
   const user = this.toObject();
   
   // Remove sensitive information
   delete user.password;
-  delete user.masterclassAccess; // Remove access codes from public responses
+  delete user.masterclassAccess;
   
   // Add virtuals to JSON output
   user.fullName = this.fullName;
   user.displayName = this.displayName;
   user.isNewUser = this.isNewUser;
-  user.hasMasterclassAccess = this.hasMasterclassAccessSimple(); // ✅ Uses the video access method
+  user.authTypeDisplay = this.authTypeDisplay;
+  user.hasMasterclassAccess = this.hasMasterclassAccessSimple();
   
   return user;
 };
@@ -390,12 +588,17 @@ userSchema.statics.findByRole = function(role) {
   return this.find({ role, active: true });
 };
 
-// 🚨 VIDEO-SPECIFIC STATIC METHOD FROM FIRST FILE
+// Static method to find users with masterclass access
 userSchema.statics.findWithMasterclassAccess = function() {
   return this.find({ masterclassVideoAccess: true, active: true });
 };
 
-// Static method to get user statistics
+// NEW: Static method to find Google users
+userSchema.statics.findGoogleUsers = function() {
+  return this.find({ authProvider: 'google', active: true });
+};
+
+// Static method to get platform statistics
 userSchema.statics.getPlatformStats = async function() {
   const [
     totalUsers,
@@ -403,7 +606,9 @@ userSchema.statics.getPlatformStats = async function() {
     students,
     admins,
     newUsersThisWeek,
-    usersWithMasterclassAccess // 🚨 VIDEO-SPECIFIC STAT
+    usersWithMasterclassAccess,
+    googleUsers, // NEW
+    emailUsers // NEW
   ] = await Promise.all([
     this.countDocuments(),
     this.countDocuments({ active: true }),
@@ -412,7 +617,9 @@ userSchema.statics.getPlatformStats = async function() {
     this.countDocuments({ 
       createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } 
     }),
-    this.countDocuments({ masterclassVideoAccess: true, active: true }) // 🚨 VIDEO-SPECIFIC
+    this.countDocuments({ masterclassVideoAccess: true, active: true }),
+    this.countDocuments({ authProvider: 'google', active: true }), // NEW
+    this.countDocuments({ authProvider: 'email', active: true }) // NEW
   ]);
   
   return {
@@ -421,7 +628,10 @@ userSchema.statics.getPlatformStats = async function() {
     students,
     admins,
     newUsersThisWeek,
-    usersWithMasterclassAccess
+    usersWithMasterclassAccess,
+    googleUsers, // NEW
+    emailUsers, // NEW
+    googlePercentage: totalUsers > 0 ? (googleUsers / totalUsers * 100).toFixed(1) : 0
   };
 };
 

@@ -1,3 +1,5 @@
+// travel-tour-backend/models/Video.js
+
 const mongoose = require('mongoose');
 
 const videoSchema = new mongoose.Schema({

@@ -55,14 +55,9 @@ app.use('/api/meet', require('./meet-module/apiGateway').router);
 // Public Routes (no auth required)
 const { router: authRouter, authMiddleware } = require('./routes/auth');
 const messageRoutes = require('./routes/messages');
-//const hotelRoutes = require('./routes/hotels'); // 🏨 ADDED: Hotel routes - PUBLIC
 
 app.use('/api/auth', authRouter);
 app.use('/api/messages', messageRoutes);
-// app.use('/api', hotelRoutes); // 🏨 ADDED: Hotel routes - PUBLIC (no auth required)
-
-// 🚨 REMOVED: Community Routes (WebRTC/Agora - old system)
-// 🚨 REMOVED: Agora Token Routes (WebRTC/Agora - old system)
 
 // 🚨 CRITICAL FIX: Configure multer for LARGE file uploads
 const storage = multer.diskStorage({
@@ -594,6 +589,118 @@ app.delete('/api/admin/videos/:id', authMiddleware, async (req, res) => {
       success: false,
       message: 'Error deleting video',
       error: error.message
+    });
+  }
+});
+
+// 🚨 CRITICAL FIX: ADD THIS ROUTE - VIDEO ACCESS VALIDATION (FIXED VERSION)
+app.post('/api/videos/validate-masterclass-access', async (req, res) => {
+  try {
+    const { accessCode, userEmail } = req.body;
+    console.log('🎥 Validating video access code:', accessCode, 'for email:', userEmail);
+    
+    if (!accessCode || !userEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Access code and email are required'
+      });
+    }
+
+    // Clean the inputs
+    const cleanAccessCode = accessCode.trim().toUpperCase();
+    const cleanUserEmail = userEmail.trim().toLowerCase();
+
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database temporarily unavailable'
+      });
+    }
+
+    const db = mongoose.connection.db;
+    
+    console.log(`🔍 Searching for video with accessCode: ${cleanAccessCode}`);
+    
+    // 🎯 CRITICAL FIX: Look for videos with matching accessCode in videos collection
+    const video = await db.collection('videos').findOne({
+      videoType: 'masterclass',
+      accessCode: cleanAccessCode // Direct match (already uppercase)
+    });
+    
+    if (!video) {
+      console.log('❌ No masterclass video found with access code:', cleanAccessCode);
+      
+      // Try case-insensitive search as fallback
+      const caseInsensitiveVideo = await db.collection('videos').findOne({
+        videoType: 'masterclass',
+        $or: [
+          { accessCode: { $regex: new RegExp(`^${cleanAccessCode}$`, 'i') } },
+          { accessCode: cleanAccessCode.toLowerCase() }
+        ]
+      });
+      
+      if (caseInsensitiveVideo) {
+        console.log('✅ Found video with case-insensitive match:', caseInsensitiveVideo.title);
+        
+        // Update the accessCode to uppercase for consistency
+        await db.collection('videos').updateOne(
+          { _id: caseInsensitiveVideo._id },
+          { $set: { accessCode: cleanAccessCode } }
+        );
+        
+        console.log(`✅ Updated accessCode to uppercase: ${cleanAccessCode}`);
+        
+        return res.json({
+          success: true,
+          message: 'Access granted!',
+          userName: cleanUserEmail.split('@')[0],
+          accessCode: cleanAccessCode
+        });
+      }
+      
+      console.log('❌ Video access code not found in any format:', cleanAccessCode);
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid access code',
+        searchedCode: cleanAccessCode
+      });
+    }
+
+    console.log('✅ Found video with matching access code:', video.title);
+    
+    // Check if email is in allowed emails (if field exists)
+    if (video.allowedEmails && Array.isArray(video.allowedEmails) && video.allowedEmails.length > 0) {
+      const isEmailAllowed = video.allowedEmails.includes(cleanUserEmail);
+      if (!isEmailAllowed) {
+        console.log('❌ Email not in allowed list:', cleanUserEmail);
+        return res.status(403).json({
+          success: false,
+          message: 'Your email is not authorized for this access code',
+          userEmail: cleanUserEmail,
+          allowedEmails: video.allowedEmails
+        });
+      }
+      console.log('✅ Email authorized in allowedEmails list');
+    } else {
+      console.log('ℹ️ No email restrictions found for video, granting access');
+    }
+
+    // Grant access
+    console.log('✅ Access granted for:', cleanUserEmail);
+    return res.json({
+      success: true,
+      message: 'Access granted',
+      userName: cleanUserEmail.split('@')[0],
+      videoTitle: video.title,
+      accessCode: cleanAccessCode
+    });
+
+  } catch (error) {
+    console.error('❌ Error validating video access code:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error validating access code',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -1289,38 +1396,6 @@ app.get('/api/courses', async (req, res) => {
   }
 });
 
-// ADD: Validate masterclass access route
-app.post('/api/courses/validate-masterclass-access', async (req, res) => {
-  try {
-    const { accessCode } = req.body;
-    console.log('🔐 Validating masterclass access code:', accessCode);
-    
-    const validCodes = ['MASTER2024', 'PREMIUM123', 'ACCESS789'];
-    
-    if (validCodes.includes(accessCode)) {
-      res.json({
-        success: true,
-        message: 'Access granted to masterclass courses',
-        access: true
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        message: 'Invalid access code',
-        access: false
-      });
-    }
-
-  } catch (error) {
-    console.error('❌ Error validating access code:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error validating access code',
-      error: error.message
-    });
-  }
-});
-
 // ADD: Notification endpoint for quiz scores
 app.put('/api/notifications/mark-read', async (req, res) => {
   try {
@@ -1385,7 +1460,7 @@ app.get('/api/debug-routes', (req, res) => {
     '/api/notifications/admin-messages/:userId',
     '/api/courses/:id',
     '/api/courses',
-    '/api/courses/validate-masterclass-access',
+    '/api/videos/validate-masterclass-access', // 🎯 FIXED ROUTE
     '/api/messages/sent',
     '/api/messages/send-to-admin', 
     '/api/messages/test',
@@ -1420,7 +1495,7 @@ app.get('/api/debug-routes', (req, res) => {
     '/api/meet/active',
     '/api/meet/health',
     '/api/videos',
-    '/api/videos/validate-masterclass-access',
+    '/api/videos/validate-masterclass-access', // 🎯 FIXED VALIDATION
     '/api/admin/upload-video',
     '/api/admin/videos',
     '/api/admin/videos/:id',
@@ -1430,8 +1505,6 @@ app.get('/api/debug-routes', (req, res) => {
     '/api/debug/quiz-collections',
     // 🏨 ADDED: Hotel Search Routes - PUBLIC
     '/api/search-hotels',
-    //'/api/get-hotel-details',
-    //'/api/get-hotel-rates'
   ];
   
   console.log('🐛 DEBUG: Listing available routes');
@@ -2672,7 +2745,7 @@ const startServer = async () => {
       console.log(`📍   Admin messages: http://localhost:${PORT}/api/notifications/admin-messages/:userId`);
       console.log(`📍   Get courses: http://localhost:${PORT}/api/courses`);
       console.log(`📍   Get course by ID: http://localhost:${PORT}/api/courses/:id`);
-      console.log(`📍   Validate masterclass: http://localhost:${PORT}/api/courses/validate-masterclass-access`);
+      console.log(`📍   Validate masterclass: http://localhost:${PORT}/api/videos/validate-masterclass-access`);
       console.log(`📍   Direct course view: http://localhost:${PORT}/api/direct-courses/:id/view`);
       console.log(`\n❓ Quiz routes:`);
       console.log(`📍   Quiz questions: http://localhost:${PORT}/api/quiz/questions`);
