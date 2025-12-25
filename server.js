@@ -55,8 +55,10 @@ app.use('/api/meet', require('./meet-module/apiGateway').router);
 // Public Routes (no auth required)
 const { router: authRouter, authMiddleware } = require('./routes/auth');
 const messageRoutes = require('./routes/messages');
+const googleAuthRoutes = require('./routes/googleAuth');  
 
 app.use('/api/auth', authRouter);
+app.use('/api/auth', googleAuthRoutes);  // NEW - handles /api/auth/google
 app.use('/api/messages', messageRoutes);
 
 // 🚨 CRITICAL FIX: Configure multer for LARGE file uploads

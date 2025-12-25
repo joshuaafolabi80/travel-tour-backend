@@ -1,3 +1,4 @@
+// travel-tour-backend/routes/googleAuth.js
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
@@ -72,10 +73,35 @@ router.post('/google', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Google auth error:', error);
+    console.error('❌ Google auth error details:', {
+      message: error.message,
+      stack: error.stack,
+      response: error.response?.data,
+      code: error.code
+    });
+    
+    // More specific error responses
+    if (error.message.includes('invalid_token') || error.code === 'invalid_token') {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid Google token. Please try signing in again.',
+        code: 'INVALID_TOKEN'
+      });
+    }
+    
+    if (error.message.includes('Client is unauthorized')) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Google OAuth client not authorized. Check your Google Cloud settings.',
+        code: 'UNAUTHORIZED_CLIENT'
+      });
+    }
+    
     res.status(500).json({ 
       success: false, 
-      message: 'Google authentication failed' 
+      message: 'Google authentication failed. Please try again.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      code: 'SERVER_ERROR'
     });
   }
 });
