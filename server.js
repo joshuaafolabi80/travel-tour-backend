@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const mammoth = require('mammoth');
 const multer = require('multer');
+const appReviewRoutes = require('./routes/appReviewRoutes');
 require('dotenv').config();
 
 const cloudinary = require('cloudinary').v2;
@@ -58,8 +59,9 @@ const messageRoutes = require('./routes/messages');
 const googleAuthRoutes = require('./routes/googleAuth');  
 
 app.use('/api/auth', authRouter);
-app.use('/api/auth', googleAuthRoutes);  // NEW - handles /api/auth/google
+app.use('/api/auth', googleAuthRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/app-reviews', appReviewRoutes);
 
 // 🚨 CRITICAL FIX: Configure multer for LARGE file uploads
 const storage = multer.diskStorage({
