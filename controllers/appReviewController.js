@@ -1,6 +1,11 @@
 const AppReview = require('../models/AppReview');
 const ShareAnalytics = require('../models/ShareAnalytics');
 
+// DEBUG: Check if everything loads
+console.log('✅ AppReviewController starting to load...');
+console.log('✅ AppReview model exists:', typeof AppReview);
+console.log('✅ ShareAnalytics model exists:', typeof ShareAnalytics);
+
 // ✅ SUBMIT REVIEW
 exports.submitReview = async (req, res) => {
     try {
@@ -76,7 +81,7 @@ exports.getStatistics = async (req, res) => {
     }
 };
 
-// ✅ UPDATE REVIEW STATUS (ADMIN)
+// ✅ UPDATE REVIEW STATUS (ADMIN) - THIS WAS THE MISSING FUNCTION
 exports.updateReviewStatus = async (req, res) => {
     try {
         const { id } = req.params;
@@ -127,3 +132,11 @@ exports.markHelpful = async (req, res) => {
         res.status(500).json({ success: false, message: 'Error' });
     }
 };
+
+// DEBUG: Confirm all exports exist
+console.log('✅ AppReviewController loaded successfully');
+console.log('✅ Exports count:', Object.keys(exports).length);
+console.log('✅ updateReviewStatus exists:', typeof exports.updateReviewStatus);
+console.log('✅ getReviews exists:', typeof exports.getReviews);
+console.log('✅ getShareAnalytics exists:', typeof exports.getShareAnalytics);
+console.log('✅ getStatistics exists:', typeof exports.getStatistics);
