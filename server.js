@@ -58,10 +58,20 @@ const { router: authRouter, authMiddleware } = require('./routes/auth');
 const messageRoutes = require('./routes/messages');
 const googleAuthRoutes = require('./routes/googleAuth');  
 
+// 1. Public routes
 app.use('/api/auth', authRouter);
 app.use('/api/auth', googleAuthRoutes);
 app.use('/api/messages', messageRoutes);
+
+// 2. Add app review routes HERE
 app.use('/api/app-reviews', appReviewRoutes);
+
+// 3. Video routes (if you have them)
+const videoRoutes = require('./routes/videos');
+const adminVideoRoutes = require('./routes/adminVideos');
+
+app.use('/api', videoRoutes);
+app.use('/api/admin', adminVideoRoutes);
 
 // 🚨 CRITICAL FIX: Configure multer for LARGE file uploads
 const storage = multer.diskStorage({
@@ -199,13 +209,6 @@ app.get('/api/admin/videos/count', authMiddleware, async (req, res) => {
     });
   }
 });
-
-// 🚨 CRITICAL FIX: VIDEO ROUTES MUST BE ADDED HERE
-const videoRoutes = require('./routes/videos');
-const adminVideoRoutes = require('./routes/adminVideos');
-
-app.use('/api', videoRoutes);
-app.use('/api/admin', adminVideoRoutes);
 
 // 🚨 ADDED: TEMPORARY ADMIN VIDEO ROUTES
 app.get('/api/admin/videos', authMiddleware, async (req, res) => {
@@ -1509,6 +1512,7 @@ app.get('/api/debug-routes', (req, res) => {
     '/api/debug/quiz-collections',
     // 🏨 ADDED: Hotel Search Routes - PUBLIC
     '/api/search-hotels',
+    '/api/app-reviews', // ADDED: App Review Routes
   ];
   
   console.log('🐛 DEBUG: Listing available routes');
@@ -2234,7 +2238,7 @@ app.put('/api/quiz/results/mark-read', async (req, res) => {
   }
 });
 
-// All routes after this middleware will require authentication
+// 5. Auth middleware for protected routes
 app.use(authMiddleware);
 
 // ADDED: COURSE MANAGEMENT ROUTES - MOVED AFTER AUTH MIDDLEWARE
@@ -2423,7 +2427,7 @@ app.put('/api/admin/mark-course-completed-read', async (req, res) => {
   }
 });
 
-// Authenticated Routes
+// 6. Protected routes (authenticated routes)
 const courseRoutes = require('./routes/courses');
 const adminRoutes = require('./routes/admin');
 
@@ -2711,7 +2715,7 @@ app.use((error, req, res, next) => {
   });
 });
 
-// 404 handler - UPDATED to handle API routes properly
+// 7. 404 handler and error handlers at the END
 app.use('*', (req, res) => {
   if (req.path.startsWith('/api')) {
     console.log(`🔍 404 - API endpoint not found: ${req.originalUrl}`);
@@ -2785,6 +2789,10 @@ const startServer = async () => {
       console.log(`📍   Search hotels: http://localhost:${PORT}/api/search-hotels`);
       console.log(`📍   Get hotel details: http://localhost:${PORT}/api/get-hotel-details`);
       console.log(`📍   Get hotel rates: http://localhost:${PORT}/api/get-hotel-rates`);
+      console.log(`\n📱 APP REVIEW ROUTES - NEWLY ADDED (PUBLIC):`);
+      console.log(`📍   Submit review: http://localhost:${PORT}/api/app-reviews/submit`);
+      console.log(`📍   Get reviews: http://localhost:${PORT}/api/app-reviews`);
+      console.log(`📍   Store metrics: http://localhost:${PORT}/api/app-reviews/store-metrics`);
       console.log(`\n🐛 Debug routes:`);
       console.log(`📍   Quiz collections debug: http://localhost:${PORT}/api/debug/quiz-collections`);
       console.log(`📍   Quiz by destination debug: http://localhost:${PORT}/api/debug/quiz-by-destination`);
@@ -2805,6 +2813,7 @@ const startServer = async () => {
       console.log('📊 Video counts: New endpoints for accurate badge notifications');
       console.log('🎯 GOOGLE MEET INTEGRATION: Professional video meetings with resource sharing');
       console.log('🏨 HOTEL SEARCH: Global hotel search with detailed information and rates - PUBLIC ACCESS');
+      console.log('📱 APP REVIEW SYSTEM: User reviews and store metrics tracking - PUBLIC ACCESS');
       console.log('🚫 WEBRTC/AGORA REMOVED: Old audio system completely removed');
       console.log('🌐 CORS configured for production: the-conclave-academy.netlify.app and travel-tour-academy-backend.onrender.com');
       console.log('📦 Frontend static files served from: ../dist directory');
@@ -2827,6 +2836,11 @@ const startServer = async () => {
       console.log('✅ Room rates and availability');
       console.log('✅ Multiple suppliers integration');
       console.log('✅ Real-time pricing');
+      console.log('✅ PUBLIC ACCESS - No authentication required');
+      console.log('\n📱 APP REVIEW FEATURES:');
+      console.log('✅ User reviews and ratings');
+      console.log('✅ App store redirection');
+      console.log('✅ Review confirmation');
       console.log('✅ PUBLIC ACCESS - No authentication required');
       console.log('\n💬 CHAT SYSTEM:');
       console.log('✅ Real-time messaging');

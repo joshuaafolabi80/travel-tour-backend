@@ -1,5 +1,3 @@
-// travel-tour-backend/models/ShareAnalytics.js
-
 const mongoose = require('mongoose');
 
 const ShareAnalyticsSchema = new mongoose.Schema({

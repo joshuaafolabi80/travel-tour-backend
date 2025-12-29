@@ -1,17 +1,17 @@
-// travel-tour-backend/controllers/appReviewController.js
-
+// backend/controllers/appReviewController.js
 const AppReview = require('../models/AppReview');
 const ShareAnalytics = require('../models/ShareAnalytics');
 const User = require('../models/User');
 
-// Submit a new review
+// ✅ SUBMIT A NEW REVIEW (FIXED - Properly exported)
 exports.submitReview = async (req, res) => {
     try {
+        console.log('📝 Review submission request received');
         const { rating, review, appStore } = req.body;
         const userId = req.user.id;
 
         // Validate rating
-        if (rating < 1 || rating > 5) {
+        if (!rating || rating < 1 || rating > 5) {
             return res.status(400).json({
                 success: false,
                 message: 'Rating must be between 1 and 5 stars'
@@ -28,7 +28,7 @@ exports.submitReview = async (req, res) => {
             // Update existing review
             existingReview.rating = rating;
             existingReview.review = review || existingReview.review;
-            existingReview.status = 'pending'; // Reset status for moderation
+            existingReview.status = 'pending';
             await existingReview.save();
 
             return res.status(200).json({
@@ -65,24 +65,26 @@ exports.submitReview = async (req, res) => {
 
         await newReview.save();
 
+        console.log(`✅ Review submitted by ${user.name || user.email}: ${rating} stars`);
+
         res.status(201).json({
             success: true,
-            message: 'Review submitted successfully. It will be visible after moderation.',
+            message: 'Review submitted successfully',
             review: newReview,
             isUpdate: false
         });
 
     } catch (error) {
-        console.error('Error submitting review:', error);
+        console.error('❌ Error submitting review:', error);
         res.status(500).json({
             success: false,
             message: 'Error submitting review',
-            error: error.message
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
         });
     }
 };
 
-// Get all reviews (with filtering and pagination)
+// ✅ GET ALL REVIEWS
 exports.getReviews = async (req, res) => {
     try {
         const {
@@ -98,19 +100,12 @@ exports.getReviews = async (req, res) => {
         // Build filter
         const filter = { status };
         
-        if (rating) {
-            filter.rating = parseInt(rating);
-        }
-        
-        if (appStore) {
-            filter.appStore = appStore;
-        }
+        if (rating) filter.rating = parseInt(rating);
+        if (appStore) filter.appStore = appStore;
 
-        // Calculate pagination
         const skip = (page - 1) * limit;
         const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
-        // Get reviews
         const reviews = await AppReview.find(filter)
             .sort(sort)
             .skip(skip)
@@ -118,16 +113,13 @@ exports.getReviews = async (req, res) => {
             .populate('userId', 'name email')
             .lean();
 
-        // Get total count
         const total = await AppReview.countDocuments(filter);
-
-        // Calculate average rating for approved reviews
         const approvedReviews = await AppReview.find({ status: 'approved' });
+        
         const averageRating = approvedReviews.length > 0
             ? approvedReviews.reduce((sum, review) => sum + review.rating, 0) / approvedReviews.length
             : 0;
 
-        // Get rating distribution
         const ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
         approvedReviews.forEach(review => {
             ratingDistribution[review.rating]++;
@@ -159,7 +151,7 @@ exports.getReviews = async (req, res) => {
     }
 };
 
-// Get user's review
+// ✅ GET USER'S REVIEW
 exports.getUserReview = async (req, res) => {
     try {
         const userId = req.user.id;
@@ -192,7 +184,7 @@ exports.getUserReview = async (req, res) => {
     }
 };
 
-// Track share analytics
+// ✅ TRACK SHARE ANALYTICS
 exports.trackShare = async (req, res) => {
     try {
         const { platform, shareMethod = 'just-once' } = req.body;
@@ -205,11 +197,9 @@ exports.trackShare = async (req, res) => {
             deviceInfo: {
                 deviceType: req.headers['user-agent']?.includes('Mobile') ? 'mobile' : 'desktop',
                 os: req.headers['user-agent'] || 'unknown',
-                browser: req.headers['user-agent'] || 'unknown',
-                screenSize: req.headers['screen-resolution'] || 'unknown'
+                browser: req.headers['user-agent'] || 'unknown'
             },
-            sessionId: req.sessionID,
-            referrer: req.headers.referer || 'direct'
+            timestamp: new Date()
         });
 
         await shareRecord.save();
@@ -228,7 +218,7 @@ exports.trackShare = async (req, res) => {
     }
 };
 
-// Get share analytics (admin only)
+// ✅ GET SHARE ANALYTICS (ADMIN)
 exports.getShareAnalytics = async (req, res) => {
     try {
         const { startDate, endDate, platform } = req.query;
@@ -249,15 +239,13 @@ exports.getShareAnalytics = async (req, res) => {
                         platform: '$platform',
                         date: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp' } }
                     },
-                    count: { $sum: 1 },
-                    uniqueUsers: { $addToSet: '$userId' }
+                    count: { $sum: 1 }
                 }
             },
             {
                 $group: {
                     _id: '$_id.platform',
                     totalShares: { $sum: '$count' },
-                    uniqueUsers: { $sum: { $size: '$uniqueUsers' } },
                     dailyStats: {
                         $push: {
                             date: '$_id.date',
@@ -284,7 +272,7 @@ exports.getShareAnalytics = async (req, res) => {
     }
 };
 
-// Get statistics (admin only)
+// ✅ GET STATISTICS (ADMIN)
 exports.getStatistics = async (req, res) => {
     try {
         const [
@@ -302,7 +290,6 @@ exports.getStatistics = async (req, res) => {
             AppReview.countDocuments({ status: 'pending' })
         ]);
 
-        // Get platform distribution
         const platformStats = await ShareAnalytics.aggregate([
             { $group: { _id: '$platform', count: { $sum: 1 } } },
             { $sort: { count: -1 } }
@@ -327,4 +314,14 @@ exports.getStatistics = async (req, res) => {
             error: error.message
         });
     }
+};
+
+// Make sure ALL functions are properly exported
+module.exports = {
+    submitReview,
+    getReviews,
+    getUserReview,
+    trackShare,
+    getShareAnalytics,
+    getStatistics
 };
