@@ -2,34 +2,23 @@ const express = require('express');
 const router = express.Router();
 const { auth, adminAuth } = require('../middleware/auth');
 
-// We destructure here so that if any function is missing in the controller, 
-// the app will crash with a clear "Missing Function" error immediately.
-const {
-    getPublicReviews,
-    submitReview,
-    getUserReview,
-    trackShare,
-    markHelpful,
-    getReviews,
-    updateReviewStatus,
-    getShareAnalytics,
-    getStatistics
-} = require('../controllers/appReviewController');
+// Use the old way instead of destructuring
+const appReviewController = require('../controllers/appReviewController');
 
 // ✅ PUBLIC
-router.get('/reviews/public', getPublicReviews);
-router.get('/reviews/stats', getPublicReviews); 
+router.get('/reviews/public', appReviewController.getPublicReviews);
+router.get('/reviews/stats', appReviewController.getPublicReviews); 
 
 // ✅ USER
-router.post('/reviews/submit', auth, submitReview);
-router.get('/reviews/my', auth, getUserReview);
-router.post('/share/track', auth, trackShare);
-router.post('/reviews/:reviewId/helpful', auth, markHelpful);
+router.post('/reviews/submit', auth, appReviewController.submitReview);
+router.get('/reviews/my', auth, appReviewController.getUserReview);
+router.post('/share/track', auth, appReviewController.trackShare);
+router.post('/reviews/:reviewId/helpful', auth, appReviewController.markHelpful);
 
 // ✅ ADMIN
-router.get('/admin/reviews/pending', adminAuth, getReviews);
-router.put('/admin/reviews/:id/status', adminAuth, updateReviewStatus);
-router.get('/admin/analytics/shares', adminAuth, getShareAnalytics);
-router.get('/admin/statistics', adminAuth, getStatistics);
+router.get('/admin/reviews/pending', adminAuth, appReviewController.getReviews);
+router.put('/admin/reviews/:id/status', adminAuth, appReviewController.updateReviewStatus);
+router.get('/admin/analytics/shares', adminAuth, appReviewController.getShareAnalytics);
+router.get('/admin/statistics', adminAuth, appReviewController.getStatistics);
 
 module.exports = router;
