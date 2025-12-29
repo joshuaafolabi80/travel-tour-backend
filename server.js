@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const mammoth = require('mammoth');
 const multer = require('multer');
-const appReviewRoutes = require('./appReviewRoutes');
+const appReviewRoutes = require('./routes/appReviewRoutes');
 require('dotenv').config();
 
 const cloudinary = require('cloudinary').v2;
