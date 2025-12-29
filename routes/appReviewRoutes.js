@@ -1,4 +1,3 @@
-// Add these new routes
 const express = require('express');
 const router = express.Router();
 const appReviewController = require('../controllers/appReviewController');
@@ -20,38 +19,7 @@ router.put('/admin/reviews/:id/status', adminAuth, appReviewController.updateRev
 router.get('/admin/analytics/shares', adminAuth, appReviewController.getShareAnalytics);
 router.get('/admin/statistics', adminAuth, appReviewController.getStatistics);
 
-// ✅ Add updateReviewStatus function to your controller
-exports.updateReviewStatus = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { status, adminResponse } = req.body;
-        
-        const updateData = { status };
-        
-        if (adminResponse) {
-            updateData.adminResponse = {
-                text: adminResponse,
-                respondedBy: req.user.name || req.user.email,
-                respondedAt: new Date()
-            };
-        }
-        
-        const review = await AppReview.findByIdAndUpdate(
-            id,
-            updateData,
-            { new: true }
-        );
-        
-        res.status(200).json({
-            success: true,
-            message: `Review ${status}`,
-            review
-        });
-    } catch (error) {
-        console.error('Error updating review status:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error updating review'
-        });
-    }
-};
+// REMOVE THIS - it should be in the controller file, not here
+// exports.updateReviewStatus = async (req, res) => { ... }
+
+module.exports = router;
