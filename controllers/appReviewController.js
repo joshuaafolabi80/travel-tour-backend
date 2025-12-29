@@ -1,10 +1,10 @@
-// backend/controllers/appReviewController.js
+// backend/controllers/appReviewController.js - COMPLETE FIXED VERSION
 const AppReview = require('../models/AppReview');
 const ShareAnalytics = require('../models/ShareAnalytics');
 const User = require('../models/User');
 
-// ✅ SUBMIT A NEW REVIEW (FIXED - Properly exported)
-exports.submitReview = async (req, res) => {
+// SUBMIT A NEW REVIEW
+const submitReview = async (req, res) => {
     try {
         console.log('📝 Review submission request received');
         const { rating, review, appStore } = req.body;
@@ -84,8 +84,8 @@ exports.submitReview = async (req, res) => {
     }
 };
 
-// ✅ GET ALL REVIEWS
-exports.getReviews = async (req, res) => {
+// GET ALL REVIEWS
+const getReviews = async (req, res) => {
     try {
         const {
             page = 1,
@@ -151,8 +151,8 @@ exports.getReviews = async (req, res) => {
     }
 };
 
-// ✅ GET USER'S REVIEW
-exports.getUserReview = async (req, res) => {
+// GET USER'S REVIEW
+const getUserReview = async (req, res) => {
     try {
         const userId = req.user.id;
         const { appStore = 'web' } = req.query;
@@ -184,8 +184,8 @@ exports.getUserReview = async (req, res) => {
     }
 };
 
-// ✅ TRACK SHARE ANALYTICS
-exports.trackShare = async (req, res) => {
+// TRACK SHARE ANALYTICS
+const trackShare = async (req, res) => {
     try {
         const { platform, shareMethod = 'just-once' } = req.body;
         const userId = req.user?.id;
@@ -218,8 +218,8 @@ exports.trackShare = async (req, res) => {
     }
 };
 
-// ✅ GET SHARE ANALYTICS (ADMIN)
-exports.getShareAnalytics = async (req, res) => {
+// GET SHARE ANALYTICS (ADMIN)
+const getShareAnalytics = async (req, res) => {
     try {
         const { startDate, endDate, platform } = req.query;
 
@@ -272,8 +272,8 @@ exports.getShareAnalytics = async (req, res) => {
     }
 };
 
-// ✅ GET STATISTICS (ADMIN)
-exports.getStatistics = async (req, res) => {
+// GET STATISTICS (ADMIN)
+const getStatistics = async (req, res) => {
     try {
         const [
             totalReviews,
@@ -316,12 +316,12 @@ exports.getStatistics = async (req, res) => {
     }
 };
 
-// Make sure ALL functions are properly exported
+// ✅ CORRECT EXPORT SYNTAX - FIXED!
 module.exports = {
-    submitReview,
-    getReviews,
-    getUserReview,
-    trackShare,
-    getShareAnalytics,
-    getStatistics
+    submitReview: submitReview,
+    getReviews: getReviews,
+    getUserReview: getUserReview,
+    trackShare: trackShare,
+    getShareAnalytics: getShareAnalytics,
+    getStatistics: getStatistics
 };
