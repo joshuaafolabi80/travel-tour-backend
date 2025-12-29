@@ -2,35 +2,37 @@
 const AppReview = require('../models/AppReview');
 const ShareAnalytics = require('../models/ShareAnalytics');
 
-// SUBMIT REVIEW
+// ✅ SUBMIT REVIEW
 exports.submitReview = async (req, res) => {
     try {
         console.log('📝 Review submission request received');
-        
-        // Simple validation
-        if (!req.body.rating) {
+        const { rating, review, appStore, deviceInfo } = req.body;
+
+        // Validation
+        if (!rating) {
             return res.status(400).json({
                 success: false,
                 message: 'Rating is required'
             });
         }
-        
-        // For now, just log and return success
-        console.log('Review data:', {
-            rating: req.body.rating,
-            review: req.body.review,
-            appStore: req.body.appStore || 'web',
-            user: req.user ? req.user.id : 'unknown'
+
+        // Create new review from request data and authenticated user
+        const newReview = new AppReview({
+            userId: req.user.id,
+            userName: req.user.name || 'Anonymous',
+            userEmail: req.user.email,
+            rating,
+            review: review || '',
+            appStore: appStore || 'web',
+            deviceInfo: deviceInfo || {}
         });
-        
-        res.status(200).json({
+
+        await newReview.save();
+
+        res.status(201).json({
             success: true,
-            message: 'Review submitted successfully (test mode)',
-            data: {
-                rating: req.body.rating,
-                review: req.body.review,
-                submittedAt: new Date()
-            }
+            message: 'Review submitted successfully and is pending approval',
+            data: newReview
         });
         
     } catch (error) {
@@ -43,13 +45,15 @@ exports.submitReview = async (req, res) => {
     }
 };
 
-// GET REVIEWS (ADMIN - PENDING)
+// ✅ GET REVIEWS (ADMIN - PENDING)
 exports.getReviews = async (req, res) => {
     try {
+        const reviews = await AppReview.find({ status: 'pending' }).sort({ createdAt: -1 });
         res.status(200).json({
             success: true,
-            reviews: [],
-            message: 'No reviews yet'
+            count: reviews.length,
+            reviews: reviews,
+            message: reviews.length > 0 ? 'Pending reviews fetched' : 'No pending reviews'
         });
     } catch (error) {
         console.error('Error in getReviews:', error);
@@ -60,13 +64,14 @@ exports.getReviews = async (req, res) => {
     }
 };
 
-// GET USER REVIEW
+// ✅ GET USER REVIEW
 exports.getUserReview = async (req, res) => {
     try {
+        const review = await AppReview.findOne({ userId: req.user.id });
         res.status(200).json({
             success: true,
-            review: null,
-            message: 'No review found for user'
+            review: review || null,
+            message: review ? 'User review found' : 'No review found for user'
         });
     } catch (error) {
         console.error('Error in getUserReview:', error);
@@ -77,7 +82,7 @@ exports.getUserReview = async (req, res) => {
     }
 };
 
-// TRACK SHARE
+// ✅ TRACK SHARE
 exports.trackShare = async (req, res) => {
     try {
         console.log('📱 Share tracked:', req.body.platform);
@@ -94,7 +99,7 @@ exports.trackShare = async (req, res) => {
     }
 };
 
-// GET ANALYTICS
+// ✅ GET ANALYTICS
 exports.getShareAnalytics = async (req, res) => {
     try {
         res.status(200).json({
@@ -111,16 +116,19 @@ exports.getShareAnalytics = async (req, res) => {
     }
 };
 
-// GET STATISTICS
+// ✅ GET STATISTICS
 exports.getStatistics = async (req, res) => {
     try {
+        const totalReviews = await AppReview.countDocuments({ status: 'approved' });
+        const pendingReviews = await AppReview.countDocuments({ status: 'pending' });
+        
         res.status(200).json({
             success: true,
             statistics: {
-                totalReviews: 0,
-                averageRating: 0,
+                totalReviews,
+                pendingReviews,
                 totalShares: 0,
-                pendingReviews: 0
+                averageRating: 0 
             }
         });
     } catch (error) {
@@ -132,7 +140,7 @@ exports.getStatistics = async (req, res) => {
     }
 };
 
-// UPDATE REVIEW STATUS (ADMIN)
+// ✅ UPDATE REVIEW STATUS (ADMIN)
 exports.updateReviewStatus = async (req, res) => {
     try {
         const { id } = req.params;
@@ -168,7 +176,7 @@ exports.updateReviewStatus = async (req, res) => {
     }
 };
 
-// GET PUBLIC REVIEWS (NO AUTH REQUIRED)
+// ✅ GET PUBLIC REVIEWS (NO AUTH REQUIRED)
 exports.getPublicReviews = async (req, res) => {
     try {
         const {
@@ -180,7 +188,6 @@ exports.getPublicReviews = async (req, res) => {
             platform = 'all'
         } = req.query;
 
-        // Only show APPROVED reviews to public
         const filter = { status: 'approved' };
         
         if (rating && rating !== 'all') {
@@ -194,17 +201,16 @@ exports.getPublicReviews = async (req, res) => {
         const skip = (page - 1) * limit;
         const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
-        // Get reviews with user info
+        // Fetch reviews - No populate needed since userName is in the schema
         const reviews = await AppReview.find(filter)
             .sort(sort)
             .skip(skip)
             .limit(parseInt(limit))
-            .populate('userId', 'name email')
-            .select('-userEmail -reportCount -unhelpfulVotes') // Hide sensitive data
+            .select('-userEmail -reportCount -unhelpfulVotes')
             .lean();
 
-        // Get stats for public display
         const totalReviews = await AppReview.countDocuments({ status: 'approved' });
+        
         const averageResult = await AppReview.aggregate([
             { $match: { status: 'approved' } },
             { $group: { _id: null, average: { $avg: '$rating' } } }
@@ -221,7 +227,6 @@ exports.getPublicReviews = async (req, res) => {
             { $sort: { _id: -1 } }
         ]);
 
-        // Format rating distribution
         const ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
         ratingDist.forEach(item => {
             ratingDistribution[item._id] = item.count;
@@ -252,22 +257,31 @@ exports.getPublicReviews = async (req, res) => {
     }
 };
 
-// MARK HELPFUL
+// ✅ MARK HELPFUL
 exports.markHelpful = async (req, res) => {
     try {
         const { reviewId } = req.params;
         
-        await AppReview.findByIdAndUpdate(
+        const review = await AppReview.findByIdAndUpdate(
             reviewId,
-            { $inc: { helpfulVotes: 1 } }
+            { $inc: { helpfulVotes: 1 } },
+            { new: true }
         );
+
+        if (!review) {
+            return res.status(404).json({
+                success: false,
+                message: 'Review not found'
+            });
+        }
 
         res.status(200).json({
             success: true,
-            message: 'Marked as helpful'
+            message: 'Marked as helpful',
+            helpfulVotes: review.helpfulVotes
         });
     } catch (error) {
-        console.error('Error marking helpful:', error);
+        console.error('❌ Error marking helpful:', error);
         res.status(500).json({
             success: false,
             message: 'Error marking helpful'
