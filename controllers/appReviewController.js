@@ -1,22 +1,14 @@
-// travel-tour-backend/controllers/appReviewController.js
 const AppReview = require('../models/AppReview');
 const ShareAnalytics = require('../models/ShareAnalytics');
 
 // ✅ SUBMIT REVIEW
 exports.submitReview = async (req, res) => {
     try {
-        console.log('📝 Review submission request received');
         const { rating, review, appStore, deviceInfo } = req.body;
-
-        // Validation
         if (!rating) {
-            return res.status(400).json({
-                success: false,
-                message: 'Rating is required'
-            });
+            return res.status(400).json({ success: false, message: 'Rating is required' });
         }
 
-        // Create new review from request data and authenticated user
         const newReview = new AppReview({
             userId: req.user.id,
             userName: req.user.name || 'Anonymous',
@@ -28,20 +20,10 @@ exports.submitReview = async (req, res) => {
         });
 
         await newReview.save();
-
-        res.status(201).json({
-            success: true,
-            message: 'Review submitted successfully and is pending approval',
-            data: newReview
-        });
-        
+        res.status(201).json({ success: true, message: 'Review submitted', data: newReview });
     } catch (error) {
         console.error('❌ Error in submitReview:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error',
-            error: error.message
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -49,18 +31,9 @@ exports.submitReview = async (req, res) => {
 exports.getReviews = async (req, res) => {
     try {
         const reviews = await AppReview.find({ status: 'pending' }).sort({ createdAt: -1 });
-        res.status(200).json({
-            success: true,
-            count: reviews.length,
-            reviews: reviews,
-            message: reviews.length > 0 ? 'Pending reviews fetched' : 'No pending reviews'
-        });
+        res.status(200).json({ success: true, count: reviews.length, reviews });
     } catch (error) {
-        console.error('Error in getReviews:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -68,51 +41,27 @@ exports.getReviews = async (req, res) => {
 exports.getUserReview = async (req, res) => {
     try {
         const review = await AppReview.findOne({ userId: req.user.id });
-        res.status(200).json({
-            success: true,
-            review: review || null,
-            message: review ? 'User review found' : 'No review found for user'
-        });
+        res.status(200).json({ success: true, review });
     } catch (error) {
-        console.error('Error in getUserReview:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
 // ✅ TRACK SHARE
 exports.trackShare = async (req, res) => {
     try {
-        console.log('📱 Share tracked:', req.body.platform);
-        res.status(200).json({
-            success: true,
-            message: 'Share tracked'
-        });
+        res.status(200).json({ success: true, message: 'Share tracked' });
     } catch (error) {
-        console.error('Error in trackShare:', error);
-        res.status(200).json({
-            success: true,
-            message: 'Share tracked (error ignored)'
-        });
+        res.status(200).json({ success: true });
     }
 };
 
 // ✅ GET ANALYTICS
 exports.getShareAnalytics = async (req, res) => {
     try {
-        res.status(200).json({
-            success: true,
-            analytics: [],
-            message: 'No analytics data yet'
-        });
+        res.status(200).json({ success: true, analytics: [] });
     } catch (error) {
-        console.error('Error in getShareAnalytics:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -121,22 +70,9 @@ exports.getStatistics = async (req, res) => {
     try {
         const totalReviews = await AppReview.countDocuments({ status: 'approved' });
         const pendingReviews = await AppReview.countDocuments({ status: 'pending' });
-        
-        res.status(200).json({
-            success: true,
-            statistics: {
-                totalReviews,
-                pendingReviews,
-                totalShares: 0,
-                averageRating: 0 
-            }
-        });
+        res.status(200).json({ success: true, statistics: { totalReviews, pendingReviews, totalShares: 0, averageRating: 0 } });
     } catch (error) {
-        console.error('Error in getStatistics:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -145,9 +81,7 @@ exports.updateReviewStatus = async (req, res) => {
     try {
         const { id } = req.params;
         const { status, adminResponse } = req.body;
-        
         const updateData = { status };
-        
         if (adminResponse) {
             updateData.adminResponse = {
                 text: adminResponse,
@@ -155,136 +89,41 @@ exports.updateReviewStatus = async (req, res) => {
                 respondedAt: new Date()
             };
         }
-        
-        const review = await AppReview.findByIdAndUpdate(
-            id,
-            updateData,
-            { new: true }
-        );
-        
-        res.status(200).json({
-            success: true,
-            message: `Review ${status}`,
-            review
-        });
+        const review = await AppReview.findByIdAndUpdate(id, updateData, { new: true });
+        res.status(200).json({ success: true, message: `Review ${status}`, review });
     } catch (error) {
-        console.error('Error updating review status:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error updating review'
-        });
+        res.status(500).json({ success: false, message: 'Error updating review' });
     }
 };
 
-// ✅ GET PUBLIC REVIEWS (NO AUTH REQUIRED)
+// ✅ GET PUBLIC REVIEWS
 exports.getPublicReviews = async (req, res) => {
     try {
-        const {
-            page = 1,
-            limit = 10,
-            rating,
-            sortBy = 'createdAt',
-            sortOrder = 'desc',
-            platform = 'all'
-        } = req.query;
-
+        const { page = 1, limit = 10, rating, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
         const filter = { status: 'approved' };
-        
-        if (rating && rating !== 'all') {
-            filter.rating = parseInt(rating);
-        }
-        
-        if (platform && platform !== 'all') {
-            filter.appStore = platform;
-        }
+        if (rating && rating !== 'all') filter.rating = parseInt(rating);
 
-        const skip = (page - 1) * limit;
-        const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
-
-        // Fetch reviews - No populate needed since userName is in the schema
         const reviews = await AppReview.find(filter)
-            .sort(sort)
-            .skip(skip)
+            .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
+            .skip((page - 1) * limit)
             .limit(parseInt(limit))
             .select('-userEmail -reportCount -unhelpfulVotes')
             .lean();
 
-        const totalReviews = await AppReview.countDocuments({ status: 'approved' });
-        
-        const averageResult = await AppReview.aggregate([
-            { $match: { status: 'approved' } },
-            { $group: { _id: null, average: { $avg: '$rating' } } }
-        ]);
-        
-        const ratingDist = await AppReview.aggregate([
-            { $match: { status: 'approved' } },
-            { 
-                $group: { 
-                    _id: '$rating', 
-                    count: { $sum: 1 } 
-                } 
-            },
-            { $sort: { _id: -1 } }
-        ]);
-
-        const ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-        ratingDist.forEach(item => {
-            ratingDistribution[item._id] = item.count;
-        });
-
-        res.status(200).json({
-            success: true,
-            reviews,
-            pagination: {
-                page: parseInt(page),
-                limit: parseInt(limit),
-                total: totalReviews,
-                pages: Math.ceil(totalReviews / limit)
-            },
-            stats: {
-                averageRating: averageResult[0]?.average?.toFixed(1) || '0.0',
-                totalReviews,
-                ratingDistribution
-            }
-        });
-
+        const totalReviews = await AppReview.countDocuments(filter);
+        res.status(200).json({ success: true, reviews, pagination: { total: totalReviews } });
     } catch (error) {
-        console.error('Error fetching public reviews:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error fetching reviews'
-        });
+        res.status(500).json({ success: false, message: 'Error fetching reviews' });
     }
 };
 
 // ✅ MARK HELPFUL
 exports.markHelpful = async (req, res) => {
     try {
-        const { reviewId } = req.params;
-        
-        const review = await AppReview.findByIdAndUpdate(
-            reviewId,
-            { $inc: { helpfulVotes: 1 } },
-            { new: true }
-        );
-
-        if (!review) {
-            return res.status(404).json({
-                success: false,
-                message: 'Review not found'
-            });
-        }
-
-        res.status(200).json({
-            success: true,
-            message: 'Marked as helpful',
-            helpfulVotes: review.helpfulVotes
-        });
+        const review = await AppReview.findByIdAndUpdate(req.params.reviewId, { $inc: { helpfulVotes: 1 } }, { new: true });
+        if (!review) return res.status(404).json({ success: false, message: 'Not found' });
+        res.status(200).json({ success: true, helpfulVotes: review.helpfulVotes });
     } catch (error) {
-        console.error('❌ Error marking helpful:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error marking helpful'
-        });
+        res.status(500).json({ success: false, message: 'Error' });
     }
 };

@@ -1,27 +1,35 @@
-// travel-tour-backend/routes/appReviewRoutes.js
-
 const express = require('express');
 const router = express.Router();
-const appReviewController = require('../controllers/appReviewController');
 const { auth, adminAuth } = require('../middleware/auth');
 
-// ✅ PUBLIC ROUTES (NO AUTH REQUIRED - EVERYONE CAN SEE)
-router.get('/reviews/public', appReviewController.getPublicReviews);
-router.get('/reviews/stats', appReviewController.getPublicReviews); // For stats only
+// We destructure here so that if any function is missing in the controller, 
+// the app will crash with a clear "Missing Function" error immediately.
+const {
+    getPublicReviews,
+    submitReview,
+    getUserReview,
+    trackShare,
+    markHelpful,
+    getReviews,
+    updateReviewStatus,
+    getShareAnalytics,
+    getStatistics
+} = require('../controllers/appReviewController');
 
-// ✅ USER ROUTES (REQUIRE AUTHENTICATION)
-router.post('/reviews/submit', auth, appReviewController.submitReview);
-router.get('/reviews/my', auth, appReviewController.getUserReview);
-router.post('/share/track', auth, appReviewController.trackShare);
-router.post('/reviews/:reviewId/helpful', auth, appReviewController.markHelpful);
+// ✅ PUBLIC
+router.get('/reviews/public', getPublicReviews);
+router.get('/reviews/stats', getPublicReviews); 
 
-// ✅ ADMIN ROUTES
-router.get('/admin/reviews/pending', adminAuth, appReviewController.getReviews); // Get pending for approval
-router.put('/admin/reviews/:id/status', adminAuth, appReviewController.updateReviewStatus);
-router.get('/admin/analytics/shares', adminAuth, appReviewController.getShareAnalytics);
-router.get('/admin/statistics', adminAuth, appReviewController.getStatistics);
+// ✅ USER
+router.post('/reviews/submit', auth, submitReview);
+router.get('/reviews/my', auth, getUserReview);
+router.post('/share/track', auth, trackShare);
+router.post('/reviews/:reviewId/helpful', auth, markHelpful);
 
-// REMOVE THIS - it should be in the controller file, not here
-// exports.updateReviewStatus = async (req, res) => { ... }
+// ✅ ADMIN
+router.get('/admin/reviews/pending', adminAuth, getReviews);
+router.put('/admin/reviews/:id/status', adminAuth, updateReviewStatus);
+router.get('/admin/analytics/shares', adminAuth, getShareAnalytics);
+router.get('/admin/statistics', adminAuth, getStatistics);
 
 module.exports = router;
