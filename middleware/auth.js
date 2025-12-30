@@ -60,17 +60,19 @@ const authMiddleware = async (req, res, next) => {
 const adminAuth = async (req, res, next) => {
     try {
         // First run regular auth
-        await authMiddleware(req, res, () => {});
+        // Note: Using a wrapper to handle the next() call within the try-catch
+        await authMiddleware(req, res, () => {
+            // This inner callback runs if authMiddleware calls next()
+            if (req.user && req.user.role === 'admin') {
+                next();
+            } else {
+                res.status(403).json({
+                    success: false,
+                    message: 'Access denied. Admin privileges required.'
+                });
+            }
+        });
         
-        // Check if user is admin (modify based on your User model)
-        if (req.user && req.user.role === 'admin') {
-            next();
-        } else {
-            res.status(403).json({
-                success: false,
-                message: 'Access denied. Admin privileges required.'
-            });
-        }
     } catch (error) {
         res.status(500).json({
             success: false,
@@ -79,4 +81,11 @@ const adminAuth = async (req, res, next) => {
     }
 };
 
-module.exports = { authMiddleware, adminAuth };
+// EXPORTS: 
+// We keep authMiddleware for existing files
+// We add 'auth' as an alias for the appReviewRoutes.js file
+module.exports = { 
+    authMiddleware, 
+    auth: authMiddleware, 
+    adminAuth 
+};
