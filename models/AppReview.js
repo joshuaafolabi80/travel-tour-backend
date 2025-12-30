@@ -1,3 +1,5 @@
+// travel-tour-backend/models/AppReview.js
+
 const mongoose = require('mongoose');
 
 const AppReviewSchema = new mongoose.Schema({

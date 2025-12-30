@@ -1,15 +1,13 @@
 const express = require('express');
 const router = express.Router();
-
-// Import middleware and controller
 const { auth, adminAuth } = require('../middleware/auth');
 const appReviewController = require('../controllers/appReviewController');
 
 // ✅ PUBLIC ROUTES
-router.get('/reviews/public', appReviewController.getPublicReviews);
-router.get('/reviews/stats', appReviewController.getPublicReviews);
+router.get('/reviews', appReviewController.getPublicReviews); // Changed to match frontend call
+router.get('/stats', appReviewController.getStatistics); 
 
-// ✅ USER ROUTES (The 'auth' here was the cause of the crash)
+// ✅ USER ROUTES
 router.post('/reviews/submit', auth, appReviewController.submitReview);
 router.get('/reviews/my', auth, appReviewController.getUserReview);
 router.post('/share/track', auth, appReviewController.trackShare);
