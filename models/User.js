@@ -1,3 +1,5 @@
+// travel-tour-backend/models/User.js
+
 // server/models/User.js (UPDATED WITH GOOGLE OAUTH INTEGRATION)
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');

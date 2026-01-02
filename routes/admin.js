@@ -848,6 +848,46 @@ router.get('/admin/dashboard-stats', authMiddleware, adminMiddleware, async (req
   }
 });
 
+// --- NEW: USER STATISTICS ENDPOINT ---
+router.get('/admin/statistics', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    console.log('📊 Fetching user statistics...');
+    
+    // Get total users count
+    const totalUsers = await User.countDocuments();
+    
+    // Get total students (users with role 'student')
+    const totalStudents = await User.countDocuments({ role: 'student' });
+    
+    // Get total admins (users with role 'admin')
+    const totalAdmins = await User.countDocuments({ role: 'admin' });
+    
+    // Get total active users (excluding admins)
+    const totalActive = await User.countDocuments({ 
+      active: true, 
+      role: { $ne: 'admin' } // Exclude admins from active count
+    });
+
+    console.log(`✅ Statistics fetched: ${totalUsers} total users, ${totalStudents} students, ${totalAdmins} admins, ${totalActive} active`);
+    
+    res.json({
+      success: true,
+      totalUsers,
+      totalStudents,
+      totalAdmins,
+      totalActive,
+      lastUpdated: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Error fetching statistics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch statistics',
+      error: error.message
+    });
+  }
+});
+
 // --- ADMIN MESSAGE COUNT ---
 router.get('/admin/messages/count', authMiddleware, adminMiddleware, async (req, res) => {
   try {
