@@ -197,12 +197,14 @@ userSchema.pre('save', function(next) {
   next();
 });
 
-// Compare password method (only for email users)
+// FIXED: Compare password method - REMOVED authProvider check
 userSchema.methods.correctPassword = async function(candidatePassword) {
-  // Google users don't have passwords
-  if (this.authProvider !== 'email' || !this.password) {
+  // If user has no password stored at all, can't login with password
+  if (!this.password) {
     return false;
   }
+  
+  // Try to compare the password regardless of authProvider
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
