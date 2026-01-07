@@ -26,8 +26,15 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
+// Helper function for remarks
+function getRemark(percentage) {
+  if (percentage >= 80) return 'Excellent';
+  if (percentage >= 60) return 'Good';
+  if (percentage >= 40) return 'Fair';
+  return 'Needs Improvement';
+}
+
 // 🚨 FIXED: Get quiz questions using destinationId matching
-// Note: This route will be accessible at /api/quiz/questions (not /api/quiz/quiz/questions)
 router.get('/questions', authMiddleware, async (req, res) => {
   try {
     const { courseId } = req.query;
@@ -109,93 +116,207 @@ router.get('/questions', authMiddleware, async (req, res) => {
   }
 });
 
-// 🚨 FIXED: Submit quiz results
-// This route will be accessible at /api/quiz/results
+// 🚨 COMPLETELY FIXED: Submit quiz results - MATCHES QuizResult MODEL SCHEMA
 router.post('/results', authMiddleware, async (req, res) => {
   try {
-    const { answers, userId, userName, courseId, courseName } = req.body;
+    const { 
+      answers, 
+      userId, 
+      userName, 
+      courseId, 
+      courseName, 
+      destination,
+      timeTaken = 0 
+    } = req.body;
     
-    console.log('📝 Submitting quiz results');
+    console.log('📝 Submitting quiz results:', { 
+      userId, 
+      userName, 
+      courseId, 
+      courseName,
+      destination,
+      answersCount: answers?.length || 0,
+      timeTaken
+    });
     
-    if (!answers || !userId || !courseId) {
+    // Validation
+    if (!answers || !Array.isArray(answers) || answers.length === 0) {
       return res.status(400).json({ 
         success: false, 
-        message: 'Missing required fields' 
+        message: 'Answers array is required and must not be empty' 
+      });
+    }
+    
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'userId is required' 
+      });
+    }
+    
+    if (!courseId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'courseId is required' 
       });
     }
 
-    // Calculate score
+    const db = mongoose.connection.db;
     let score = 0;
     const questionResults = [];
-    const db = mongoose.connection.db;
 
+    // Process each answer
     for (const answer of answers) {
-      const question = await db.collection('quiz_questions').findOne({ 
-        _id: new mongoose.Types.ObjectId(answer.questionId) 
-      });
-      
-      if (question) {
-        const correctIndex = question.options.findIndex(option => option === question.correctAnswer);
-        const isCorrect = correctIndex === answer.selectedAnswer;
-        if (isCorrect) score++;
-        
-        questionResults.push({
-          questionId: answer.questionId,
-          questionText: question.question,
-          selectedAnswer: answer.selectedAnswer,
-          correctAnswer: correctIndex,
-          correctAnswerText: question.correctAnswer,
-          isCorrect: isCorrect,
-          options: question.options || [],
-          explanation: question.explanation
+      try {
+        if (!answer.questionId) {
+          console.warn('⚠️ Answer missing questionId:', answer);
+          continue;
+        }
+
+        const question = await db.collection('quiz_questions').findOne({ 
+          _id: new mongoose.Types.ObjectId(answer.questionId) 
         });
+        
+        if (question) {
+          // Find correct answer index
+          const correctIndex = question.options.findIndex(option => option === question.correctAnswer);
+          const selectedOption = answer.selectedAnswer !== undefined ? answer.selectedAnswer : answer.selectedOption;
+          
+          if (selectedOption === undefined) {
+            console.warn('⚠️ Answer missing selected option:', answer);
+            continue;
+          }
+          
+          const isCorrect = correctIndex === selectedOption;
+          
+          if (isCorrect) {
+            score++;
+          }
+          
+          // 🚨 CRITICAL: Create answer object matching QuizResult schema
+          const processedAnswer = {
+            questionId: answer.questionId,
+            question: question.question, // Must match schema field name "question"
+            selectedOption: selectedOption, // Must match schema field name "selectedOption"
+            correctAnswer: correctIndex,
+            correctAnswerText: question.correctAnswer,
+            isCorrect: isCorrect,
+            options: question.options || [],
+            explanation: question.explanation || ''
+          };
+          
+          questionResults.push(processedAnswer);
+          
+          console.log(`✓ Processed question ${answer.questionId}: selected=${selectedOption}, correct=${correctIndex}, isCorrect=${isCorrect}`);
+        } else {
+          console.warn(`⚠️ Question not found for ID: ${answer.questionId}`);
+        }
+      } catch (err) {
+        console.error(`❌ Error processing answer ${answer.questionId}:`, err.message);
       }
     }
 
+    // Calculate results
     const totalQuestions = answers.length;
-    const percentage = Math.round((score / totalQuestions) * 100);
+    const percentage = totalQuestions > 0 ? Math.round((score / totalQuestions) * 100) : 0;
+    const remark = getRemark(percentage);
 
-    // Save result
-    const quizResult = new QuizResult({
+    console.log(`📊 Quiz results calculated: ${score}/${totalQuestions} (${percentage}%) - ${remark}`);
+
+    // Prepare quiz result data
+    const quizResultData = {
       userId: userId,
-      userName: userName || req.user.name || req.user.email.split('@')[0],
+      userName: userName || req.user?.name || req.user?.email?.split('@')[0] || 'Unknown User',
       courseId: courseId,
-      courseName: courseName,
+      courseName: courseName || destination || 'Unknown Course',
+      destination: destination || '',
       score: score,
       totalQuestions: totalQuestions,
       percentage: percentage,
-      answers: questionResults,
-      timeTaken: req.body.timeTaken || 0,
+      remark: remark, // 🚨 REQUIRED by schema
+      timeTaken: timeTaken,
       status: 'completed',
-      submittedAt: new Date()
+      answers: questionResults,
+      submittedAt: new Date(),
+      readByAdmin: false
+    };
+
+    console.log('💾 Saving quiz result with data:', {
+      userId: quizResultData.userId,
+      courseName: quizResultData.courseName,
+      score: quizResultData.score,
+      totalQuestions: quizResultData.totalQuestions,
+      percentage: quizResultData.percentage,
+      remark: quizResultData.remark,
+      answersCount: quizResultData.answers.length
     });
 
-    await quizResult.save();
+    // Validate the data matches schema
+    try {
+      // Create and validate quiz result
+      const quizResult = new QuizResult(quizResultData);
+      
+      // Manually validate before save
+      await quizResult.validate();
+      
+      // Save to database
+      await quizResult.save();
 
-    console.log(`✅ Quiz result saved: ${score}/${totalQuestions} (${percentage}%)`);
+      console.log(`✅ Quiz result saved successfully: ${quizResult._id}`);
 
-    res.json({
-      success: true,
-      score: score,
-      totalQuestions: totalQuestions,
-      percentage: percentage,
-      resultId: quizResult._id,
-      remark: getRemark(percentage),
-      answers: questionResults
-    });
+      res.json({
+        success: true,
+        score: score,
+        totalQuestions: totalQuestions,
+        percentage: percentage,
+        remark: remark,
+        resultId: quizResult._id,
+        answers: questionResults,
+        message: 'Quiz submitted successfully!'
+      });
+
+    } catch (validationError) {
+      console.error('❌ QuizResult validation failed:', validationError);
+      console.error('❌ Validation errors:', validationError.errors);
+      
+      // Send detailed validation errors
+      const errorDetails = {};
+      if (validationError.errors) {
+        Object.keys(validationError.errors).forEach(key => {
+          errorDetails[key] = validationError.errors[key].message;
+        });
+      }
+      
+      res.status(400).json({ 
+        success: false, 
+        message: 'Quiz submission validation failed',
+        error: validationError.message,
+        details: errorDetails,
+        submittedData: {
+          remark: quizResultData.remark,
+          answersSample: quizResultData.answers.slice(0, 2).map(a => ({
+            hasQuestion: !!a.question,
+            hasSelectedOption: a.selectedOption !== undefined,
+            questionLength: a.question?.length || 0
+          }))
+        }
+      });
+    }
 
   } catch (error) {
     console.error('❌ Error submitting quiz results:', error);
+    console.error('❌ Error stack:', error.stack);
+    
     res.status(500).json({ 
       success: false, 
       message: 'Error submitting quiz results',
-      error: error.message 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
 
 // 🚨 FIXED: Get quiz results for a user
-// This route will be accessible at /api/quiz/user-results (to avoid conflict with existing /api/quiz/results)
 router.get('/user-results', authMiddleware, async (req, res) => {
   try {
     console.log('📊 Fetching quiz results for user:', req.user._id);
@@ -260,6 +381,40 @@ router.get('/results/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// 🚨 FIXED: Get all quiz results (admin only)
+router.get('/admin-results', authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Access denied: Admin only' 
+      });
+    }
+
+    console.log('📊 Admin fetching all quiz results');
+    
+    const results = await QuizResult.find()
+      .sort({ submittedAt: -1 })
+      .populate('userId', 'username email name');
+
+    console.log(`✅ Admin found ${results.length} quiz results total`);
+
+    res.json({
+      success: true,
+      results: results,
+      total: results.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching admin quiz results:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching admin quiz results',
+      error: error.message 
+    });
+  }
+});
+
 // 🚨 FIXED: Mark quiz results as read by admin
 router.put('/results/mark-read', authMiddleware, async (req, res) => {
   try {
@@ -313,12 +468,126 @@ router.put('/results/mark-read', authMiddleware, async (req, res) => {
   }
 });
 
-// Helper function
-function getRemark(percentage) {
-  if (percentage >= 80) return 'Excellent';
-  if (percentage >= 60) return 'Good';
-  if (percentage >= 40) return 'Fair';
-  return 'Needs Improvement';
-}
+// 🚨 DEBUG: Test quiz submission with sample data
+router.post('/test-submit', authMiddleware, async (req, res) => {
+  try {
+    console.log('🧪 Testing quiz submission with sample data');
+    
+    // Sample test data that matches the schema
+    const testData = {
+      userId: req.user._id,
+      userName: req.user.name || 'Test User',
+      courseId: 'test-course-id',
+      courseName: 'Test Course',
+      destination: 'Test Destination',
+      timeTaken: 300,
+      answers: [
+        {
+          questionId: new mongoose.Types.ObjectId(),
+          selectedAnswer: 0,
+          questionText: 'Sample question 1'
+        },
+        {
+          questionId: new mongoose.Types.ObjectId(),
+          selectedAnswer: 2,
+          questionText: 'Sample question 2'
+        }
+      ]
+    };
+    
+    // Call the actual submission route with test data
+    req.body = testData;
+    
+    // Create a mock response object
+    const mockRes = {
+      json: (data) => {
+        console.log('✅ Test submission result:', data);
+        res.json({
+          success: true,
+          message: 'Test completed',
+          testResult: data
+        });
+      },
+      status: (code) => {
+        console.log(`Test status: ${code}`);
+        return mockRes;
+      }
+    };
+    
+    // Call the actual results route
+    await router.stack.find(r => r.route.path === '/results' && r.route.methods.post).handle(req, mockRes);
+    
+  } catch (error) {
+    console.error('❌ Test submission error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test failed',
+      error: error.message
+    });
+  }
+});
+
+// 🚨 DEBUG: Get QuizResult schema info
+router.get('/schema-info', authMiddleware, async (req, res) => {
+  try {
+    const schema = QuizResult.schema;
+    
+    // Extract required fields
+    const requiredFields = [];
+    const answerSchema = schema.path('answers');
+    
+    Object.keys(schema.paths).forEach(pathName => {
+      const path = schema.paths[pathName];
+      if (path.isRequired) {
+        requiredFields.push(pathName);
+      }
+    });
+    
+    res.json({
+      success: true,
+      schemaInfo: {
+        modelName: 'QuizResult',
+        requiredFields: requiredFields,
+        answersSchema: {
+          type: answerSchema?.instance,
+          required: answerSchema?.isRequired,
+          nestedFields: answerSchema?.schema ? Object.keys(answerSchema.schema.paths) : []
+        },
+        sampleDocument: {
+          userId: 'ObjectId',
+          userName: 'String (required)',
+          courseId: 'String (required)',
+          courseName: 'String (required)',
+          score: 'Number (required)',
+          totalQuestions: 'Number (required)',
+          percentage: 'Number (required)',
+          remark: 'String (required)',
+          timeTaken: 'Number',
+          status: 'String',
+          answers: [{
+            questionId: 'ObjectId',
+            question: 'String (required)',
+            selectedOption: 'Number (required)',
+            correctAnswer: 'Number (required)',
+            correctAnswerText: 'String',
+            isCorrect: 'Boolean (required)',
+            options: ['String'],
+            explanation: 'String'
+          }],
+          submittedAt: 'Date',
+          readByAdmin: 'Boolean'
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error getting schema info:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error getting schema info',
+      error: error.message
+    });
+  }
+});
 
 module.exports = router;
