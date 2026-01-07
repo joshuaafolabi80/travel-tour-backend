@@ -27,7 +27,8 @@ const authMiddleware = async (req, res, next) => {
 };
 
 // 🚨 FIXED: Get quiz questions using destinationId matching
-router.get('/quiz/questions', authMiddleware, async (req, res) => {
+// Note: This route will be accessible at /api/quiz/questions (not /api/quiz/quiz/questions)
+router.get('/questions', authMiddleware, async (req, res) => {
   try {
     const { courseId } = req.query;
     
@@ -77,19 +78,25 @@ router.get('/quiz/questions', authMiddleware, async (req, res) => {
     console.log(`✅ Found ${questions.length} questions for "${destinationId}"`);
 
     // Format questions (exclude correct answers for security)
-    const formattedQuestions = questions.map(q => ({
-      id: q._id,
-      question: q.question,
-      options: q.options || [],
-      explanation: q.explanation
-    }));
+    const formattedQuestions = questions.map(q => {
+      const correctIndex = q.options.findIndex(option => option === q.correctAnswer);
+      
+      return {
+        id: q._id,
+        question: q.question,
+        options: q.options || [],
+        correctAnswer: correctIndex, // Send as index, not the actual answer text
+        explanation: q.explanation
+      };
+    });
 
     res.json({
       success: true,
       questions: formattedQuestions,
       totalQuestions: formattedQuestions.length,
       destinationId: destinationId,
-      courseName: course.name
+      courseName: course.name,
+      courseId: course._id
     });
 
   } catch (error) {
@@ -103,7 +110,8 @@ router.get('/quiz/questions', authMiddleware, async (req, res) => {
 });
 
 // 🚨 FIXED: Submit quiz results
-router.post('/quiz/results', authMiddleware, async (req, res) => {
+// This route will be accessible at /api/quiz/results
+router.post('/results', authMiddleware, async (req, res) => {
   try {
     const { answers, userId, userName, courseId, courseName } = req.body;
     
@@ -127,16 +135,19 @@ router.post('/quiz/results', authMiddleware, async (req, res) => {
       });
       
       if (question) {
-        const isCorrect = question.correctAnswer === answer.selectedAnswer;
+        const correctIndex = question.options.findIndex(option => option === question.correctAnswer);
+        const isCorrect = correctIndex === answer.selectedAnswer;
         if (isCorrect) score++;
         
         questionResults.push({
           questionId: answer.questionId,
           questionText: question.question,
           selectedAnswer: answer.selectedAnswer,
-          correctAnswer: question.correctAnswer,
+          correctAnswer: correctIndex,
+          correctAnswerText: question.correctAnswer,
           isCorrect: isCorrect,
-          options: question.options || []
+          options: question.options || [],
+          explanation: question.explanation
         });
       }
     }
@@ -155,7 +166,8 @@ router.post('/quiz/results', authMiddleware, async (req, res) => {
       percentage: percentage,
       answers: questionResults,
       timeTaken: req.body.timeTaken || 0,
-      status: 'completed'
+      status: 'completed',
+      submittedAt: new Date()
     });
 
     await quizResult.save();
@@ -168,7 +180,8 @@ router.post('/quiz/results', authMiddleware, async (req, res) => {
       totalQuestions: totalQuestions,
       percentage: percentage,
       resultId: quizResult._id,
-      remark: getRemark(percentage)
+      remark: getRemark(percentage),
+      answers: questionResults
     });
 
   } catch (error) {
@@ -181,21 +194,16 @@ router.post('/quiz/results', authMiddleware, async (req, res) => {
   }
 });
 
-// 🚨 FIXED: Get quiz results
-router.get('/quiz/results', authMiddleware, async (req, res) => {
+// 🚨 FIXED: Get quiz results for a user
+// This route will be accessible at /api/quiz/user-results (to avoid conflict with existing /api/quiz/results)
+router.get('/user-results', authMiddleware, async (req, res) => {
   try {
-    console.log('📊 Fetching quiz results');
+    console.log('📊 Fetching quiz results for user:', req.user._id);
     
-    let query = {};
-    
-    if (req.user.role === 'student') {
-      query.userId = req.user._id;
-    }
-    
-    const results = await QuizResult.find(query)
-      .sort({ createdAt: -1 });
+    const results = await QuizResult.find({ userId: req.user._id })
+      .sort({ submittedAt: -1 });
 
-    console.log(`✅ Found ${results.length} quiz results`);
+    console.log(`✅ Found ${results.length} quiz results for user ${req.user._id}`);
 
     res.json({
       success: true,
@@ -213,8 +221,47 @@ router.get('/quiz/results', authMiddleware, async (req, res) => {
   }
 });
 
-// 🚨 FIXED: Mark as read by admin
-router.put('/quiz/results/mark-read-admin', authMiddleware, async (req, res) => {
+// 🚨 FIXED: Get specific quiz result by ID
+router.get('/results/:id', authMiddleware, async (req, res) => {
+  try {
+    const resultId = req.params.id;
+    
+    const result = await QuizResult.findById(resultId);
+    
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: 'Quiz result not found'
+      });
+    }
+
+    // Check if user has permission to view this result
+    if (req.user.role !== 'admin' && result.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to view this result'
+      });
+    }
+
+    console.log(`✅ Found quiz result: ${resultId}`);
+
+    res.json({
+      success: true,
+      result: result
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching quiz result:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching quiz result',
+      error: error.message 
+    });
+  }
+});
+
+// 🚨 FIXED: Mark quiz results as read by admin
+router.put('/results/mark-read', authMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
       return res.status(403).json({ 
@@ -223,24 +270,45 @@ router.put('/quiz/results/mark-read-admin', authMiddleware, async (req, res) => 
       });
     }
 
-    const result = await QuizResult.updateMany(
-      { readByAdmin: false },
-      { readByAdmin: true }
-    );
+    const { resultIds } = req.body;
+    let result;
+    
+    if (resultIds && Array.isArray(resultIds) && resultIds.length > 0) {
+      result = await QuizResult.updateMany(
+        { _id: { $in: resultIds } },
+        { 
+          $set: { 
+            readByAdmin: true, 
+            readAt: new Date() 
+          } 
+        }
+      );
+    } else {
+      result = await QuizResult.updateMany(
+        { readByAdmin: false },
+        { 
+          $set: { 
+            readByAdmin: true, 
+            readAt: new Date() 
+          } 
+        }
+      );
+    }
 
-    console.log(`✅ Marked ${result.modifiedCount} results as read`);
+    console.log(`✅ Marked ${result.modifiedCount} quiz results as read`);
 
     res.json({
       success: true,
-      message: `Marked ${result.modifiedCount} results as read`,
+      message: `Marked ${result.modifiedCount} quiz results as read`,
       modifiedCount: result.modifiedCount
     });
 
   } catch (error) {
-    console.error('Error marking results as read:', error);
+    console.error('❌ Error marking quiz results as read:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Error marking results as read' 
+      message: 'Error marking quiz results as read',
+      error: error.message 
     });
   }
 });

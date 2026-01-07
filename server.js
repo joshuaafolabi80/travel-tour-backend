@@ -1,4 +1,4 @@
-// travel-tour-backend/server.js - COMPLETE INTEGRATED VERSION WITH GOOGLE MEET SUPPORT
+// travel-tour-backend/server.js - COMPLETE INTEGRATED VERSION WITH FIXED QUIZ ROUTES
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -1694,87 +1694,16 @@ app.get('/api/masterclass-course-questions', async (req, res) => {
   }
 });
 
-// QUIZ ROUTES - FIXED: FILTER BY COURSE/DESTINATION
-app.get('/api/quiz/questions', async (req, res) => {
-  try {
-    const { courseId, destinationId, destination } = req.query;
-    
-    console.log('📝 Fetching quiz questions for:', { courseId, destinationId, destination });
-    
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: 'Database temporarily unavailable'
-      });
-    }
+// ====================================================================
+// 🚨 IMPORTANT: REMOVED DUPLICATE QUIZ ROUTES FROM HERE
+// The quiz routes will now be handled by the imported quiz.js router
+// ====================================================================
 
-    const db = mongoose.connection.db;
-    
-    let query = {};
-    
-    if (courseId && mongoose.Types.ObjectId.isValid(courseId)) {
-      query.courseRef = new mongoose.Types.ObjectId(courseId);
-    } else if (destinationId) {
-      query.destinationId = destinationId;
-    } else if (destination) {
-      query.destinationId = destination;
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: 'Either courseId, destinationId, or destination query parameter is required'
-      });
-    }
-    
-    console.log('🔍 Query filter:', query);
-    
-    const questions = await db.collection('quiz_questions')
-      .find(query)
-      .limit(20)
-      .toArray();
-    
-    console.log(`✅ Found ${questions.length} questions for the specified course/destination`);
-    
-    if (questions.length === 0) {
-      console.log('⚠️ No questions found for this course/destination');
-      
-      return res.status(404).json({
-        success: false,
-        message: "No questions found for this destination",
-        filteredBy: query
-      });
-    }
-    
-    const formattedQuestions = questions.map(q => {
-      const correctIndex = q.options.findIndex(option => option === q.correctAnswer);
-      
-      return {
-        id: q._id,
-        question: q.question,
-        options: q.options || [],
-        correctAnswer: correctIndex,
-        explanation: q.explanation
-      };
-    });
-    
-    res.json({
-      success: true,
-      questions: formattedQuestions,
-      total: formattedQuestions.length,
-      filteredBy: query,
-      collection: 'quiz_questions'
-    });
+// 🚨 ADD: Import and use the quiz router
+const quizRoutes = require('./routes/quiz');
+app.use('/api/quiz', quizRoutes); // This mounts quiz routes at /api/quiz
 
-  } catch (error) {
-    console.error('❌ Error fetching quiz questions:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching quiz questions',
-      error: error.message
-    });
-  }
-});
-
-// QUIZ SUBMIT ROUTE - ORIGINAL
+// QUIZ SUBMIT ROUTE - ORIGINAL (Keep as fallback)
 app.post('/api/quiz/submit', async (req, res) => {
   try {
     console.log('📥 Quiz submission received via /api/quiz/submit');
@@ -1857,133 +1786,6 @@ app.post('/api/quiz/submit', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error submitting quiz via /api/quiz/submit:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error submitting quiz',
-      error: error.message
-    });
-  }
-});
-
-// ADDED: QUIZ SUBMIT ROUTE - COMPATIBILITY ROUTE (for frontend using /api/quiz/results)
-app.post('/api/quiz/results', async (req, res) => {
-  try {
-    console.log('📥 Quiz submission received via /api/quiz/results');
-    
-    const { 
-      answers, 
-      userId, 
-      userName, 
-      courseId, 
-      courseName, 
-      destination, 
-      score, 
-      totalQuestions, 
-      percentage, 
-      timeTaken, 
-      remark 
-    } = req.body;
-    
-    if (!answers || !userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields: answers and userId are required'
-      });
-    }
-
-    const db = mongoose.connection.db;
-    const QuizResult = require('./models/QuizResult');
-
-    let calculatedScore = score || 0;
-    const questionResults = [];
-
-    if (score === undefined) {
-      for (const answer of answers) {
-        const questionQuery = { 
-          _id: new mongoose.Types.ObjectId(answer.questionId)
-        };
-        
-        if (courseId && mongoose.Types.ObjectId.isValid(courseId)) {
-          questionQuery.courseRef = new mongoose.Types.ObjectId(courseId);
-        } else if (destination) {
-          questionQuery.destinationId = destination;
-        }
-        
-        const question = await db.collection('quiz_questions').findOne(questionQuery);
-        
-        if (question) {
-          const correctIndex = question.options.findIndex(option => option === question.correctAnswer);
-          const isCorrect = correctIndex === answer.selectedAnswer;
-          
-          if (isCorrect) calculatedScore++;
-          
-          questionResults.push({
-            questionId: answer.questionId,
-            questionText: question.question,
-            selectedAnswer: answer.selectedAnswer,
-            correctAnswer: correctIndex,
-            correctAnswerText: question.correctAnswer,
-            isCorrect: isCorrect,
-            options: question.options || [],
-            explanation: question.explanation
-          });
-        }
-      }
-    } else {
-      questionResults.push(...answers);
-    }
-
-    const finalTotalQuestions = totalQuestions || answers.length;
-    const finalPercentage = percentage || Math.round((calculatedScore / finalTotalQuestions) * 100);
-    const finalTimeTaken = timeTaken || 0;
-    
-    const getRemark = (percent) => {
-      if (percent >= 80) return "Excellent";
-      if (percent >= 60) return "Good";
-      if (percent >= 40) return "Fair";
-      return "Needs Improvement";
-    };
-    
-    const finalRemark = remark || getRemark(finalPercentage);
-
-    const quizResult = new QuizResult({
-      userId: userId,
-      userName: userName,
-      courseId: courseId,
-      courseName: courseName || destination,
-      destination: destination,
-      score: calculatedScore,
-      totalQuestions: finalTotalQuestions,
-      percentage: finalPercentage,
-      timeTaken: finalTimeTaken,
-      remark: finalRemark,
-      answers: questionResults,
-      status: "completed",
-      date: new Date(),
-      submittedAt: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date()
-    });
-
-    await quizResult.save();
-
-    console.log(`✅ Quiz result saved: ${calculatedScore}/${finalTotalQuestions} (${finalPercentage}%) - ${finalRemark}`);
-
-    res.json({
-      success: true,
-      score: calculatedScore,
-      totalQuestions: finalTotalQuestions,
-      percentage: finalPercentage,
-      timeTaken: finalTimeTaken,
-      remark: finalRemark,
-      resultId: quizResult._id,
-      answers: questionResults,
-      collection: 'quiz_results',
-      message: 'Quiz results saved successfully'
-    });
-
-  } catch (error) {
-    console.error('❌ Error submitting quiz via /api/quiz/results:', error);
     res.status(500).json({
       success: false,
       message: 'Error submitting quiz',
@@ -2756,7 +2558,7 @@ const startServer = async () => {
       console.log(`📍   Validate masterclass: http://localhost:${PORT}/api/videos/validate-masterclass-access`);
       console.log(`📍   Direct course view: http://localhost:${PORT}/api/direct-courses/:id/view`);
       console.log(`\n❓ Quiz routes:`);
-      console.log(`📍   Quiz questions: http://localhost:${PORT}/api/quiz/questions`);
+      console.log(`📍   Quiz questions (main): http://localhost:${PORT}/api/quiz/questions`);
       console.log(`📍   Quiz submit (route 1): http://localhost:${PORT}/api/quiz/submit`);
       console.log(`📍   Quiz submit (route 2): http://localhost:${PORT}/api/quiz/results`);
       console.log(`📍   Quiz results admin: http://localhost:${PORT}/api/quiz/results/admin`);
