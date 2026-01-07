@@ -1,4 +1,4 @@
-// server/models/Course.js - UPDATED VERSION
+// travel-tour-backend/models/Course.js
 const mongoose = require('mongoose');
 
 const faqSchema = new mongoose.Schema({

@@ -1,3 +1,5 @@
+// travel-tour-backend/routes/quiz.js
+
 const express = require('express');
 const mongoose = require('mongoose');
 const QuizResult = require('../models/QuizResult');
@@ -24,19 +26,48 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
-// 🚨 SIMPLIFIED: Get quiz questions from existing quiz_questions collection
+// 🚨 FIXED: Get quiz questions for specific course
 router.get('/quiz/questions', authMiddleware, async (req, res) => {
   try {
-    console.log('🔍 Fetching quiz questions from existing quiz_questions collection');
+    // Get courseId from query parameter
+    const { courseId } = req.query;
+    
+    if (!courseId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'courseId parameter is required' 
+      });
+    }
+    
+    console.log(`🔍 Fetching quiz questions for courseId: ${courseId}`);
     
     // Direct access to the existing collection
     const db = mongoose.connection.db;
-    const questions = await db.collection('quiz_questions')
-      .find({})
-      .limit(20)
+    
+    // First try: courseId as string (how you have it stored)
+    let questions = await db.collection('quiz_questions')
+      .find({ courseId: courseId })
       .toArray();
-
-    console.log(`✅ Found ${questions.length} questions from existing quiz_questions collection`);
+    
+    // Second try: If no results, try with ObjectId
+    if (questions.length === 0) {
+      try {
+        questions = await db.collection('quiz_questions')
+          .find({ courseId: new mongoose.Types.ObjectId(courseId) })
+          .toArray();
+      } catch (err) {
+        console.log('⚠️ Could not convert to ObjectId');
+      }
+    }
+    
+    if (questions.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'No questions found for this destination' 
+      });
+    }
+    
+    console.log(`✅ Found ${questions.length} questions for courseId: ${courseId}`);
 
     // Format questions (exclude correct answers for security)
     const formattedQuestions = questions.map(q => ({
@@ -50,7 +81,7 @@ router.get('/quiz/questions', authMiddleware, async (req, res) => {
       success: true,
       questions: formattedQuestions,
       totalQuestions: formattedQuestions.length,
-      collection: 'quiz_questions'
+      courseId: courseId
     });
 
   } catch (error) {
@@ -70,10 +101,10 @@ router.post('/quiz/results', authMiddleware, async (req, res) => {
     
     console.log('📝 Submitting quiz results to quiz_results collection');
     
-    if (!answers || !userId) {
+    if (!answers || !userId || !courseId) {
       return res.status(400).json({ 
         success: false, 
-        message: 'Missing required fields: answers and userId are required' 
+        message: 'Missing required fields: answers, userId, and courseId are required' 
       });
     }
 
@@ -105,7 +136,7 @@ router.post('/quiz/results', authMiddleware, async (req, res) => {
     const totalQuestions = answers.length;
     const percentage = Math.round((score / totalQuestions) * 100);
 
-    // Save to quiz_results collection using the fixed model
+    // Save to quiz_results collection
     const quizResult = new QuizResult({
       userId: userId,
       userName: userName || req.user.name || req.user.email.split('@')[0],
@@ -121,7 +152,7 @@ router.post('/quiz/results', authMiddleware, async (req, res) => {
 
     await quizResult.save();
 
-    console.log(`✅ Quiz result saved to quiz_results collection: ${score}/${totalQuestions} (${percentage}%)`);
+    console.log(`✅ Quiz result saved: ${score}/${totalQuestions} (${percentage}%) for courseId: ${courseId}`);
 
     res.json({
       success: true,
@@ -157,7 +188,7 @@ router.get('/quiz/results', authMiddleware, async (req, res) => {
     const results = await QuizResult.find(query)
       .sort({ createdAt: -1 });
 
-    console.log(`✅ Found ${results.length} quiz results from quiz_results collection`);
+    console.log(`✅ Found ${results.length} quiz results`);
 
     res.json({
       success: true,
