@@ -26,10 +26,9 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
-// 🚨 FIXED: Get quiz questions for specific course
+// 🚨 FIXED: Get quiz questions using destinationId matching
 router.get('/quiz/questions', authMiddleware, async (req, res) => {
   try {
-    // Get courseId from query parameter
     const { courseId } = req.query;
     
     if (!courseId) {
@@ -39,35 +38,43 @@ router.get('/quiz/questions', authMiddleware, async (req, res) => {
       });
     }
     
-    console.log(`🔍 Fetching quiz questions for courseId: ${courseId}`);
+    console.log(`🔍 Fetching quiz questions for course: ${courseId}`);
     
-    // Direct access to the existing collection
-    const db = mongoose.connection.db;
-    
-    // First try: courseId as string (how you have it stored)
-    let questions = await db.collection('quiz_questions')
-      .find({ courseId: courseId })
-      .toArray();
-    
-    // Second try: If no results, try with ObjectId
-    if (questions.length === 0) {
-      try {
-        questions = await db.collection('quiz_questions')
-          .find({ courseId: new mongoose.Types.ObjectId(courseId) })
-          .toArray();
-      } catch (err) {
-        console.log('⚠️ Could not convert to ObjectId');
-      }
+    // 1. Find the course to get its destinationId
+    let course;
+    try {
+      course = await Course.findById(courseId);
+    } catch (error) {
+      console.log('⚠️ Could not find course with ObjectId, trying string match');
+      // Try finding by destinationId if courseId is actually a destinationId string
+      course = await Course.findOne({ destinationId: courseId });
     }
     
+    if (!course) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Course not found' 
+      });
+    }
+    
+    const destinationId = course.destinationId;
+    console.log(`📚 Found course: "${course.name}", destinationId: "${destinationId}"`);
+    
+    // 2. Get questions using destinationId
+    const db = mongoose.connection.db;
+    const questions = await db.collection('quiz_questions')
+      .find({ destinationId: destinationId })
+      .toArray();
+    
     if (questions.length === 0) {
+      console.log(`❌ No questions found for destinationId: "${destinationId}"`);
       return res.status(404).json({ 
         success: false, 
         message: 'No questions found for this destination' 
       });
     }
     
-    console.log(`✅ Found ${questions.length} questions for courseId: ${courseId}`);
+    console.log(`✅ Found ${questions.length} questions for "${destinationId}"`);
 
     // Format questions (exclude correct answers for security)
     const formattedQuestions = questions.map(q => ({
@@ -81,7 +88,8 @@ router.get('/quiz/questions', authMiddleware, async (req, res) => {
       success: true,
       questions: formattedQuestions,
       totalQuestions: formattedQuestions.length,
-      courseId: courseId
+      destinationId: destinationId,
+      courseName: course.name
     });
 
   } catch (error) {
@@ -94,21 +102,21 @@ router.get('/quiz/questions', authMiddleware, async (req, res) => {
   }
 });
 
-// 🚨 FIXED: Submit quiz results to quiz_results collection
+// 🚨 FIXED: Submit quiz results
 router.post('/quiz/results', authMiddleware, async (req, res) => {
   try {
     const { answers, userId, userName, courseId, courseName } = req.body;
     
-    console.log('📝 Submitting quiz results to quiz_results collection');
+    console.log('📝 Submitting quiz results');
     
     if (!answers || !userId || !courseId) {
       return res.status(400).json({ 
         success: false, 
-        message: 'Missing required fields: answers, userId, and courseId are required' 
+        message: 'Missing required fields' 
       });
     }
 
-    // Calculate score using direct collection access
+    // Calculate score
     let score = 0;
     const questionResults = [];
     const db = mongoose.connection.db;
@@ -136,7 +144,7 @@ router.post('/quiz/results', authMiddleware, async (req, res) => {
     const totalQuestions = answers.length;
     const percentage = Math.round((score / totalQuestions) * 100);
 
-    // Save to quiz_results collection
+    // Save result
     const quizResult = new QuizResult({
       userId: userId,
       userName: userName || req.user.name || req.user.email.split('@')[0],
@@ -152,7 +160,7 @@ router.post('/quiz/results', authMiddleware, async (req, res) => {
 
     await quizResult.save();
 
-    console.log(`✅ Quiz result saved: ${score}/${totalQuestions} (${percentage}%) for courseId: ${courseId}`);
+    console.log(`✅ Quiz result saved: ${score}/${totalQuestions} (${percentage}%)`);
 
     res.json({
       success: true,
@@ -173,14 +181,13 @@ router.post('/quiz/results', authMiddleware, async (req, res) => {
   }
 });
 
-// 🚨 FIXED: Get all quiz results from quiz_results collection
+// 🚨 FIXED: Get quiz results
 router.get('/quiz/results', authMiddleware, async (req, res) => {
   try {
-    console.log('📊 Fetching quiz results from quiz_results collection');
+    console.log('📊 Fetching quiz results');
     
     let query = {};
     
-    // For students, only show their own results
     if (req.user.role === 'student') {
       query.userId = req.user._id;
     }
@@ -206,7 +213,7 @@ router.get('/quiz/results', authMiddleware, async (req, res) => {
   }
 });
 
-// 🚨 FIXED: Mark quiz results as read by admin
+// 🚨 FIXED: Mark as read by admin
 router.put('/quiz/results/mark-read-admin', authMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -221,24 +228,24 @@ router.put('/quiz/results/mark-read-admin', authMiddleware, async (req, res) => 
       { readByAdmin: true }
     );
 
-    console.log(`✅ Marked ${result.modifiedCount} quiz results as read by admin`);
+    console.log(`✅ Marked ${result.modifiedCount} results as read`);
 
     res.json({
       success: true,
-      message: `Marked ${result.modifiedCount} quiz results as read by admin`,
+      message: `Marked ${result.modifiedCount} results as read`,
       modifiedCount: result.modifiedCount
     });
 
   } catch (error) {
-    console.error('Error marking quiz results as read:', error);
+    console.error('Error marking results as read:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Error marking quiz results as read' 
+      message: 'Error marking results as read' 
     });
   }
 });
 
-// Helper function to get performance remark
+// Helper function
 function getRemark(percentage) {
   if (percentage >= 80) return 'Excellent';
   if (percentage >= 60) return 'Good';
